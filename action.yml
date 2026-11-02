@@ -1,0 +1,52 @@
+name: Pi Pull Request Review
+description: Review a pull request with pi-coding-agent and post a comment review.
+
+inputs:
+  auth-json:
+    description: Contents of Pi's auth.json. Provide this or api-key, not both.
+    required: false
+  api-key:
+    description: API key for the selected provider. Provide this or auth-json, not both.
+    required: false
+  base-url:
+    description: Optional API base URL override for the selected Pi provider.
+    required: false
+  provider:
+    description: Pi provider ID.
+    required: true
+  model:
+    description: Model ID supported by the selected Pi provider.
+    required: true
+  thinking:
+    description: "Thinking level: off, minimal, low, medium, high, xhigh, or max."
+    required: false
+    default: medium
+  prompt:
+    description: Markdown prompt file relative to the workspace, with a bundled default.
+    required: false
+    default: .pi/prompts/review-pull-request.md
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26
+
+    - name: Install Pi
+      shell: bash
+      run: npm install --global --ignore-scripts --no-audit --no-fund @earendil-works/pi-coding-agent@1.5.0
+
+    - name: Review pull request
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        PI_AUTH_JSON: ${{ inputs.auth-json }}
+        PI_API_KEY: ${{ inputs.api-key }}
+        PI_BASE_URL: ${{ inputs.base-url }}
+        PI_PROVIDER: ${{ inputs.provider }}
+        PI_MODEL: ${{ inputs.model }}
+        PI_THINKING: ${{ inputs.thinking }}
+        PI_PROMPT: ${{ inputs.prompt }}
+      run: node "$GITHUB_ACTION_PATH/scripts/review.mjs"
