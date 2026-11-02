@@ -162,23 +162,41 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-test("the review manifest launches the source entry point from its action directory", () => {
-  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/src/review.mjs"')
-})
-
-test("runs the manifest from a source-only action directory with spaces", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-review-source-"))
+function copyDistribution() {
+  const root = mkdtempSync(join(tmpdir(), "pi-review-dist-"))
   roots.push(root)
-  const directory = join(root, "action source")
-  for (const path of ["src", ".pi/prompts"]) {
+  const directory = join(root, "action distribution")
+  for (const path of ["dist", ".pi/prompts", "package.json"]) {
     cpSync(resolve(path), join(directory, path), { recursive: true })
   }
+  return directory
+}
+
+test("the review manifest launches the compiled entry point from its action directory", () => {
+  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/dist/review.js"')
+})
+
+test("runs the manifest from a distribution-only action directory with spaces", () => {
+  const directory = copyDistribution()
+  expect(readdirSync(directory).sort()).toEqual([".pi", "dist", "package.json"])
   const { result, json } = runAction({ GITHUB_ACTION_PATH: directory })
   expect(result.status, result.stderr).toBe(0)
   const args = json("pi.json").args
   expect(args[args.indexOf("--system-prompt") + 1]).toBe(
     join(directory, ".pi/prompts/review-pull-request.md"),
   )
+})
+
+test.each([
+  ["dist/pi.js", "ERR_MODULE_NOT_FOUND"],
+  [".pi/prompts/review-pull-request.md", "The prompt file does not exist."],
+])("fails safely when the distribution is missing %s", (path, message) => {
+  const directory = copyDistribution()
+  rmSync(join(directory, path))
+  const { result, root } = runAction({ GITHUB_ACTION_PATH: directory })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(message)
+  expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
 })
 
 test("reviews the event's exact commits with the API key and bundled prompt", () => {
@@ -320,6 +338,9 @@ test.each([
   [{ PI_BASE_URL: "file:///tmp/model" }, "HTTP or HTTPS"],
   [{ PI_PROMPT: "missing.md" }, "prompt file does not exist"],
   [{ GITHUB_EVENT_NAME: "pull_request_target" }, "pull_request event"],
+  [{ GITHUB_EVENT_PATH: "" }, "GITHUB_EVENT_PATH is required"],
+  [{ GITHUB_WORKSPACE: "" }, "GITHUB_WORKSPACE and RUNNER_TEMP are required"],
+  [{ RUNNER_TEMP: "" }, "GITHUB_WORKSPACE and RUNNER_TEMP are required"],
 ])("rejects invalid inputs %j before invoking commands", (overrides, message) => {
   const { result, root } = runAction(overrides)
   expect(result.status).toBe(1)

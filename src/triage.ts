@@ -1,22 +1,41 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { escapeCommand, withPi } from "./pi.mjs"
+import { escapeCommand, withPi } from "./pi.js"
 
-function parseLabels(output, available) {
-  let result
+type NamedLabel = { name: string }
+type RepositoryLabel = NamedLabel & { description?: string | null }
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function isNamedLabel(value: unknown): value is NamedLabel {
+  return isObject(value) && typeof value.name === "string"
+}
+
+function isRepositoryLabel(value: unknown): value is RepositoryLabel {
+  return (
+    isNamedLabel(value) &&
+    value.name.trim().length > 0 &&
+    (!("description" in value) ||
+      value.description == null ||
+      typeof value.description === "string")
+  )
+}
+
+function parseLabels(output: string, available: RepositoryLabel[]): string[] {
+  let result: unknown
   try {
     result = JSON.parse(output)
   } catch {
     throw new Error("Pi must return a JSON object with a labels array.")
   }
   if (
-    !result ||
-    typeof result !== "object" ||
-    Array.isArray(result) ||
+    !isObject(result) ||
     Object.keys(result).length !== 1 ||
     !Array.isArray(result.labels) ||
-    result.labels.some((label) => typeof label !== "string")
+    !result.labels.every((label: unknown): label is string => typeof label === "string")
   ) {
     throw new Error("Pi returned an invalid labels schema.")
   }
@@ -32,35 +51,54 @@ function triageIssue() {
   if (env.GITHUB_EVENT_NAME !== "issues") {
     throw new Error("This action requires an issues event.")
   }
-  const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"))
-  if (!["opened", "edited", "reopened"].includes(event.action)) {
+  const eventPath = env.GITHUB_EVENT_PATH
+  if (!eventPath) throw new Error("GITHUB_EVENT_PATH is required.")
+  const event: unknown = JSON.parse(readFileSync(eventPath, "utf8"))
+  if (!isObject(event)) {
+    throw new Error("The event must contain a valid issue number, not a pull request.")
+  }
+  if (
+    typeof event.action !== "string" ||
+    !["opened", "edited", "reopened"].includes(event.action)
+  ) {
     console.log("Skipping unsupported issue activity.")
     return
   }
-  const number = event.issue?.number
-  if (!Number.isSafeInteger(number) || number < 1 || event.issue?.pull_request) {
+  const eventIssue = isObject(event.issue) ? event.issue : undefined
+  const number = eventIssue?.number
+  if (
+    typeof number !== "number" ||
+    !Number.isSafeInteger(number) ||
+    number < 1 ||
+    eventIssue?.pull_request
+  ) {
     throw new Error("The event must contain a valid issue number, not a pull request.")
   }
 
   withPi(".pi/prompts/triage-issue.md", ({ directory, options, run }) => {
     const repository = `repos/${env.GITHUB_REPOSITORY}`
     const endpoint = `${repository}/issues/${number}`
-    const api = (args) => execFileSync("gh", ["api", ...args], options).trim()
+    const api = (args: string[]) => execFileSync("gh", ["api", ...args], options).trim()
     const fetchIssue = () => {
-      const issue = JSON.parse(api([endpoint]))
+      const issue: unknown = JSON.parse(api([endpoint]))
       if (
-        !issue ||
+        !isObject(issue) ||
         issue.number !== number ||
         issue.pull_request ||
         typeof issue.title !== "string" ||
         (issue.body !== null && typeof issue.body !== "string") ||
-        !["open", "closed"].includes(issue.state) ||
+        (issue.state !== "open" && issue.state !== "closed") ||
         !Array.isArray(issue.labels) ||
-        issue.labels.some((label) => !label || typeof label.name !== "string")
+        !issue.labels.every(isNamedLabel)
       ) {
         throw new Error("GitHub must return an issue with a title, body, state, and labels.")
       }
-      return { ...issue, body: issue.body ?? "" }
+      return {
+        title: issue.title,
+        body: issue.body ?? "",
+        state: issue.state,
+        labels: issue.labels,
+      }
     }
     const issue = fetchIssue()
     if (issue.state !== "open") {
@@ -68,20 +106,12 @@ function triageIssue() {
       return
     }
 
-    const pages = JSON.parse(api([`${repository}/labels`, "--paginate", "--slurp"]))
+    const pages: unknown = JSON.parse(api([`${repository}/labels`, "--paginate", "--slurp"]))
     if (!Array.isArray(pages) || pages.some((page) => !Array.isArray(page))) {
       throw new Error("GitHub must return repository label pages.")
     }
-    const available = pages.flat()
-    if (
-      available.some(
-        (label) =>
-          !label ||
-          typeof label.name !== "string" ||
-          !label.name.trim() ||
-          (label.description != null && typeof label.description !== "string"),
-      )
-    ) {
+    const available: unknown[] = pages.flat()
+    if (!available.every(isRepositoryLabel)) {
       throw new Error("GitHub must return label names and descriptions.")
     }
     if (!available.length) {

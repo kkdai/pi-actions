@@ -253,22 +253,39 @@ afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
 })
 
-test("the triage manifest launches the source entry point from its action directory", () => {
-  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/../src/triage.mjs"')
-})
-
-test("runs the manifest from a source-only action directory with spaces", () => {
-  const root = mkdtempSync(join(tmpdir(), "pi-triage-source-"))
+function copyDistribution() {
+  const root = mkdtempSync(join(tmpdir(), "pi-triage-dist-"))
   roots.push(root)
-  const directory = join(root, "action source")
-  for (const path of ["src", ".pi/prompts"]) {
+  const directory = join(root, "action distribution")
+  for (const path of ["dist", ".pi/prompts", "package.json"]) {
     cpSync(resolve(path), join(directory, path), { recursive: true })
   }
-  const triagePath = join(directory, "triage")
-  mkdirSync(triagePath)
-  const { result, pi } = runAction({ GITHUB_ACTION_PATH: triagePath })
+  mkdirSync(join(directory, "triage"))
+  return directory
+}
+
+test("the triage manifest launches the compiled entry point from its action directory", () => {
+  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/../dist/triage.js"')
+})
+
+test("runs the manifest from a distribution-only action directory with spaces", () => {
+  const directory = copyDistribution()
+  expect(readdirSync(directory).sort()).toEqual([".pi", "dist", "package.json", "triage"])
+  const { result, pi } = runAction({ GITHUB_ACTION_PATH: join(directory, "triage") })
   expect(result.status, result.stderr).toBe(0)
   expect(pi.args[pi.args.indexOf("--system-prompt") + 1]).toBe(join(directory, defaultPrompt))
+})
+
+test.each([
+  ["dist/pi.js", "ERR_MODULE_NOT_FOUND"],
+  [defaultPrompt, "The prompt file does not exist."],
+])("fails safely when the distribution is missing %s", (path, message) => {
+  const directory = copyDistribution()
+  rmSync(join(directory, path))
+  const { result, calls } = runAction({ GITHUB_ACTION_PATH: join(directory, "triage") })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain(message)
+  expect(calls).toEqual([])
 })
 
 test("classifies the live issue with isolated API key auth and the bundled prompt", () => {
@@ -644,6 +661,9 @@ const invalidInputs: [string, Record<string, string>][] = [
   ["non-HTTP base URL", { PI_BASE_URL: "file:///tmp/model" }],
   ["malformed base URL", { PI_BASE_URL: "not a URL" }],
   ["missing custom prompt", { PI_PROMPT: "missing.md" }],
+  ["missing event path", { GITHUB_EVENT_PATH: "" }],
+  ["missing workspace", { GITHUB_WORKSPACE: "" }],
+  ["missing runner temp", { RUNNER_TEMP: "" }],
 ]
 
 test.each(invalidInputs)("rejects %s before invoking commands", (_name, overrides) => {

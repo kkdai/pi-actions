@@ -1,8 +1,26 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { escapeCommand, withPi } from "./pi.mjs"
-import { buildReview, summaryMarker } from "./review-output.mjs"
+import { escapeCommand, withPi } from "./pi.js"
+import { buildReview, summaryMarker } from "./review-output.js"
+
+type GitHubComment = {
+  id: number
+  user?: { login?: string } | null
+  body?: string | null
+  path?: string
+  line?: number | null
+  original_line?: number | null
+  side?: string | null
+  start_line?: number | null
+  original_start_line?: number | null
+  start_side?: string | null
+  original_commit_id?: string
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
 
 function reviewPullRequest() {
   const env = process.env
@@ -10,15 +28,22 @@ function reviewPullRequest() {
     throw new Error("This action requires a pull_request event.")
   }
 
-  const event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, "utf8"))
-  const number = event.number
-  const base = event.pull_request?.base?.sha
-  const head = event.pull_request?.head?.sha
+  const eventPath = env.GITHUB_EVENT_PATH
+  if (!eventPath) throw new Error("GITHUB_EVENT_PATH is required.")
+  const event: unknown = JSON.parse(readFileSync(eventPath, "utf8"))
+  const number = isObject(event) ? event.number : undefined
+  const pullRequest =
+    isObject(event) && isObject(event.pull_request) ? event.pull_request : undefined
+  const base = pullRequest && isObject(pullRequest.base) ? pullRequest.base.sha : undefined
+  const head = pullRequest && isObject(pullRequest.head) ? pullRequest.head.sha : undefined
   if (
+    typeof number !== "number" ||
     !Number.isSafeInteger(number) ||
     number < 1 ||
-    !/^[a-f0-9]{40,64}$/.test(base || "") ||
-    !/^[a-f0-9]{40,64}$/.test(head || "")
+    typeof base !== "string" ||
+    !/^[a-f0-9]{40,64}$/.test(base) ||
+    typeof head !== "string" ||
+    !/^[a-f0-9]{40,64}$/.test(head)
   ) {
     throw new Error("The pull request event must contain a number and base/head commit IDs.")
   }
@@ -42,15 +67,22 @@ function reviewPullRequest() {
     const review = run(diffPath, "Review the attached pull request diff.")
     if (!review) throw new Error("Pi returned an empty review.")
     const report = buildReview(review, diff, head)
-    const api = (args) => execFileSync("gh", ["api", ...args], options).trim()
-    const list = (endpoint) => JSON.parse(api([endpoint, "--paginate", "--slurp"])).flat()
-    const request = (method, endpoint, payload) => {
+    const api = (args: string[]) => execFileSync("gh", ["api", ...args], options).trim()
+    const list = (endpoint: string): GitHubComment[] =>
+      (JSON.parse(api([endpoint, "--paginate", "--slurp"])) as GitHubComment[][]).flat()
+    const request = (
+      method: "PATCH" | "POST",
+      endpoint: string,
+      payload: Record<string, unknown>,
+    ) => {
       const requestPath = join(directory, "request.json")
       writeFileSync(requestPath, JSON.stringify(payload))
-      return JSON.parse(api(["--method", method, endpoint, "--input", requestPath]))
+      return JSON.parse(api(["--method", method, endpoint, "--input", requestPath])) as {
+        html_url: string
+      }
     }
-    const isPiBot = (comment) => comment.user?.login === "github-actions[bot]"
-    const commentKey = (comment) =>
+    const isPiBot = (comment: GitHubComment) => comment.user?.login === "github-actions[bot]"
+    const commentKey = (comment: Partial<GitHubComment>) =>
       JSON.stringify([
         comment.path,
         comment.original_line ?? comment.line,
