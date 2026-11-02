@@ -35,8 +35,8 @@ jobs:
       - uses: narumiruna/pi-action@main
         with:
           api-key: ${{ secrets.PI_API_KEY }}
-          provider: anthropic
-          model: claude-sonnet-4-6
+          provider: openai
+          model: gpt-6.1-sol
           thinking: medium
 ```
 
@@ -51,8 +51,8 @@ includes both. The action installs Node.js and Pi.
 | `auth-json` | One credential input | Contents of Pi's `auth.json`, including API keys or OAuth credentials.                                                 |
 | `api-key`   | One credential input | API key for `provider`.                                                                                                |
 | `base-url`  | No                   | API base URL override for an existing Pi provider. Its API protocol and model catalog stay unchanged.                  |
-| `provider`  | Yes                  | Pi provider ID, such as `anthropic` or `openai-codex`.                                                                 |
-| `model`     | Yes                  | Model ID in the selected provider's Pi catalog.                                                                        |
+| `provider`  | No                   | Pi provider ID. Default: `openai`.                                                                                     |
+| `model`     | No                   | Model ID in the selected provider's Pi catalog. Default: `gpt-6.1-sol`.                                                |
 | `thinking`  | No                   | `off`, `minimal`, `low`, `medium` (default), `high`, `xhigh`, or `max`. Pi limits it to levels supported by the model. |
 | `prompt`    | No                   | Markdown prompt file. Default: `.pi/prompts/review-pull-request.md`.                                                   |
 
@@ -69,8 +69,8 @@ Run `/login` in Pi, then save the contents of `~/.pi/agent/auth.json` as the
 - uses: narumiruna/pi-action@main
   with:
     auth-json: ${{ secrets.PI_AUTH_JSON }}
-    provider: openai-codex
-    model: gpt-5.4
+    provider: openai
+    model: gpt-6.1-sol
     thinking: high
 ```
 

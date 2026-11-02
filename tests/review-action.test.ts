@@ -94,8 +94,8 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
       GITHUB_REPOSITORY: "owner/repo",
       GITHUB_WORKSPACE: workspace,
       RUNNER_TEMP: runner,
-      PI_PROVIDER: "anthropic",
-      PI_MODEL: "claude-sonnet-4-6",
+      PI_PROVIDER: "openai",
+      PI_MODEL: "gpt-6.1-sol",
       PI_API_KEY: "test-api-key",
       PI_AUTH_JSON: "",
       PI_BASE_URL: "",
@@ -132,7 +132,7 @@ test("reviews the event's exact commits with the API key and bundled prompt", ()
     ],
   })
   const pi = json("pi.json")
-  expect(pi.auth).toEqual({ anthropic: { type: "api_key", key: "test-api-key" } })
+  expect(pi.auth).toEqual({ openai: { type: "api_key", key: "test-api-key" } })
   expect(pi.mode).toBe(0o600)
   expect(pi.cwd).toBe(pi.directory)
   expect(pi.models).toBeNull()
@@ -149,9 +149,9 @@ test("reviews the event's exact commits with the API key and bundled prompt", ()
       "--no-context-files",
       "--no-approve",
       "--provider",
-      "anthropic",
+      "openai",
       "--model",
-      "claude-sonnet-4-6",
+      "gpt-6.1-sol",
       "--thinking",
       "medium",
       resolve(".pi/prompts/review-pull-request.md"),
@@ -178,16 +178,16 @@ test("loads only the selected OAuth credential from auth-json", () => {
   const { result, json } = runAction({
     PI_API_KEY: "",
     PI_AUTH_JSON: JSON.stringify({
-      "openai-codex": credential,
-      anthropic: { type: "api_key", key: "unused-key" },
+      openai: credential,
+      "unused-provider": { type: "api_key", key: "unused-key" },
     }),
-    PI_PROVIDER: "openai-codex",
-    PI_MODEL: "gpt-5.4",
+    PI_PROVIDER: "openai",
+    PI_MODEL: "gpt-6.1-sol",
     PI_THINKING: "high",
   })
   expect(result.status, result.stderr).toBe(0)
-  expect(json("pi.json").auth).toEqual({ "openai-codex": credential })
-  expect(json("pi.json").args).toEqual(expect.arrayContaining(["openai-codex", "gpt-5.4", "high"]))
+  expect(json("pi.json").auth).toEqual({ openai: credential })
+  expect(json("pi.json").args).toEqual(expect.arrayContaining(["openai", "gpt-6.1-sol", "high"]))
   expect(result.stdout).toContain("::add-mask::access-token")
   expect(result.stdout).toContain("::add-mask::refresh-token")
   expect(result.stdout).not.toContain("unused-key")
@@ -197,16 +197,16 @@ test("loads an API key credential from auth-json", () => {
   const credential = { type: "api_key", key: "stored-api-key" }
   const { result, json } = runAction({
     PI_API_KEY: "",
-    PI_AUTH_JSON: JSON.stringify({ anthropic: credential }),
+    PI_AUTH_JSON: JSON.stringify({ openai: credential }),
   })
   expect(result.status, result.stderr).toBe(0)
-  expect(json("pi.json").auth).toEqual({ anthropic: credential })
+  expect(json("pi.json").auth).toEqual({ openai: credential })
 })
 
 test.each(["", 123])("rejects an invalid auth-json API key %j", (key) => {
   const { result, root } = runAction({
     PI_API_KEY: "",
-    PI_AUTH_JSON: JSON.stringify({ anthropic: { type: "api_key", key } }),
+    PI_AUTH_JSON: JSON.stringify({ openai: { type: "api_key", key } }),
   })
   expect(result.status).toBe(1)
   expect(result.stderr).toContain("non-empty string")
@@ -217,7 +217,7 @@ test("sets the provider base URL without replacing its model catalog", () => {
   const { result, json } = runAction({ PI_BASE_URL: "https://proxy.example.com/v1" })
   expect(result.status, result.stderr).toBe(0)
   expect(json("pi.json").models).toEqual({
-    providers: { anthropic: { baseUrl: "https://proxy.example.com/v1" } },
+    providers: { openai: { baseUrl: "https://proxy.example.com/v1" } },
   })
 })
 

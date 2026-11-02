@@ -13,10 +13,12 @@ inputs:
     required: false
   provider:
     description: Pi provider ID.
-    required: true
+    required: false
+    default: openai
   model:
     description: Model ID supported by the selected Pi provider.
-    required: true
+    required: false
+    default: gpt-6.1-sol
   thinking:
     description: "Thinking level: off, minimal, low, medium, high, xhigh, or max."
     required: false
