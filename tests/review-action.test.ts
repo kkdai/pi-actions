@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,10 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, expect, test } from "vitest"
 
-const script = resolve("scripts/review.mjs")
+const actionPath = resolve(".")
+const runCommand = readFileSync(join(actionPath, "action.yml"), "utf8").match(
+  /^ {6}run: (node .+)$/m,
+)?.[1]
 const roots: string[] = []
 const base = "a".repeat(40)
 const head = "b".repeat(40)
@@ -113,35 +117,42 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
     mkdirSync(resolve(fullPath, ".."), { recursive: true })
     writeFileSync(fullPath, "Custom review instructions.")
   }
-  const result = spawnSync(process.execPath, [script], {
-    cwd: workspace,
-    encoding: "utf8",
-    env: {
-      ...process.env,
-      PATH: `${bin}:${process.env.PATH}`,
-      GH_TOKEN: "github-token",
-      GITHUB_TOKEN: "alternate-github-token",
-      GITHUB_EVENT_NAME: "pull_request",
-      GITHUB_EVENT_PATH: eventPath,
-      GITHUB_REPOSITORY: "owner/repo",
-      GITHUB_WORKSPACE: workspace,
-      RUNNER_TEMP: runner,
-      PI_PROVIDER: "openai",
-      PI_MODEL: "gpt-6.1-sol",
-      PI_API_KEY: "test-api-key",
-      PI_AUTH_JSON: "",
-      PI_BASE_URL: "",
-      PI_THINKING: "medium",
-      PI_PROMPT: ".pi/prompts/review-pull-request.md",
-      MOCK_ROOT: root,
-      MOCK_DIFF: diff,
-      MOCK_REVIEW: JSON.stringify(noFindings),
-      MOCK_SUMMARIES: "[[]]",
-      MOCK_INLINE_COMMENTS: "[[]]",
-      MOCK_CURRENT_HEAD: head,
-      ...overrides,
+  const result = spawnSync(
+    "bash",
+    ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", runCommand ?? "exit 1"],
+    {
+      cwd: workspace,
+      encoding: "utf8",
+      timeout: 15_000,
+      env: {
+        ...process.env,
+        PATH: `${bin}:${process.env.PATH}`,
+        GH_TOKEN: "github-token",
+        GITHUB_TOKEN: "alternate-github-token",
+        GITHUB_ACTION_PATH: actionPath,
+        GITHUB_EVENT_NAME: "pull_request",
+        GITHUB_EVENT_PATH: eventPath,
+        GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_WORKSPACE: workspace,
+        RUNNER_TEMP: runner,
+        PI_PROVIDER: "openai",
+        PI_MODEL: "gpt-6.1-sol",
+        PI_API_KEY: "test-api-key",
+        PI_AUTH_JSON: "",
+        PI_BASE_URL: "",
+        PI_THINKING: "medium",
+        PI_PROMPT: ".pi/prompts/review-pull-request.md",
+        MOCK_ROOT: root,
+        MOCK_DIFF: diff,
+        MOCK_REVIEW: JSON.stringify(noFindings),
+        MOCK_SUMMARIES: "[[]]",
+        MOCK_INLINE_COMMENTS: "[[]]",
+        MOCK_CURRENT_HEAD: head,
+        ...overrides,
+      },
     },
-  })
+  )
+  expect(result.error).toBeUndefined()
   const json = (name: string) => JSON.parse(readFileSync(join(root, name), "utf8"))
   expect(readdirSync(runner)).toEqual([])
   return { result, root, workspace, json }
@@ -149,6 +160,25 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+test("the review manifest launches the source entry point from its action directory", () => {
+  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/src/review.mjs"')
+})
+
+test("runs the manifest from a source-only action directory with spaces", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-review-source-"))
+  roots.push(root)
+  const directory = join(root, "action source")
+  for (const path of ["src", ".pi/prompts"]) {
+    cpSync(resolve(path), join(directory, path), { recursive: true })
+  }
+  const { result, json } = runAction({ GITHUB_ACTION_PATH: directory })
+  expect(result.status, result.stderr).toBe(0)
+  const args = json("pi.json").args
+  expect(args[args.indexOf("--system-prompt") + 1]).toBe(
+    join(directory, ".pi/prompts/review-pull-request.md"),
+  )
 })
 
 test("reviews the event's exact commits with the API key and bundled prompt", () => {

@@ -127,12 +127,20 @@ without an exact diff location. Plain Markdown output is not supported.
 
 ## Development
 
+Action runtime modules are in `src/`: `review.mjs`, `review-output.mjs`,
+`triage.mjs`, and the shared `pi.mjs`. Both composite actions run these `.mjs`
+files directly; no build is required to use the actions. Development tools,
+such as `pre-commit.sh`, remain in `scripts/`.
+
 ```sh
 npm ci
 npm run ci
 ```
 
 ### Verify GitHub comments
+
+Local tests mock Pi and GitHub. They do not verify live model output, GitHub
+permissions, or rendered comments.
 
 Use a test PR to check the rendered comments after pushing an action revision:
 

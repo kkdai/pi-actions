@@ -1,5 +1,5 @@
 import { expect, test } from "vitest"
-import { buildReview, summaryMarker } from "../scripts/review-output.mjs"
+import { buildReview, summaryMarker } from "../src/review-output.mjs"
 
 const head = "b".repeat(40)
 const diff = [
