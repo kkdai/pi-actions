@@ -1,0 +1,254 @@
+export const summaryMarker = "<!-- pi-action:summary -->"
+
+const severities = ["critical", "high", "medium", "low"]
+const sides = ["LEFT", "RIGHT"]
+const bodyLimit = 65536
+
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+function hasShape(value, required, optional = []) {
+  return (
+    isObject(value) &&
+    required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => required.includes(key) || optional.includes(key))
+  )
+}
+
+function isText(value) {
+  return typeof value === "string" && value.trim().length > 0
+}
+
+function isLine(value) {
+  return Number.isSafeInteger(value) && value > 0
+}
+
+function validateOutput(raw) {
+  let output
+  try {
+    if (typeof raw !== "string") throw new Error()
+    output = JSON.parse(raw)
+  } catch {
+    throw new Error("Review output must be one JSON object without fences or prose.")
+  }
+  if (
+    !hasShape(output, ["summary", "findings"]) ||
+    !isText(output.summary) ||
+    !Array.isArray(output.findings)
+  ) {
+    throw new Error("Invalid review schema: expected summary and findings.")
+  }
+  for (const finding of output.findings) {
+    if (
+      !hasShape(finding, ["severity", "title", "body", "location"]) ||
+      !severities.includes(finding.severity) ||
+      !isText(finding.title) ||
+      !isText(finding.body)
+    ) {
+      throw new Error("Invalid review schema: invalid finding.")
+    }
+    const location = finding.location
+    if (
+      location !== null &&
+      (!hasShape(location, ["path", "line", "side"], ["start_line"]) ||
+        !isText(location.path) ||
+        !isLine(location.line) ||
+        !sides.includes(location.side) ||
+        (Object.hasOwn(location, "start_line") && !isLine(location.start_line)))
+    ) {
+      throw new Error("Invalid review schema: invalid location.")
+    }
+  }
+  return output
+}
+
+// Git quotes paths with C escapes and octal UTF-8 bytes, not JSON escapes.
+function decodePath(value, prefix) {
+  // Git adds a tab delimiter after unquoted header paths that contain spaces.
+  if (value.endsWith("\t")) value = value.slice(0, -1)
+  if (value.includes("\t")) return undefined
+  if (value === "/dev/null") return null
+  if (value.startsWith('"')) {
+    if (!value.endsWith('"')) return undefined
+    const bytes = []
+    const escapes = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 }
+    const encoder = new TextEncoder()
+    const text = value.slice(1, -1)
+    for (let index = 0; index < text.length; index++) {
+      const character = text[index]
+      if (character === '"') return undefined
+      if (character !== "\\") {
+        const point = text.codePointAt(index)
+        bytes.push(...encoder.encode(String.fromCodePoint(point)))
+        if (point > 0xffff) index++
+        continue
+      }
+      const escaped = text[++index]
+      if (Object.hasOwn(escapes, escaped)) {
+        bytes.push(escapes[escaped])
+      } else {
+        const octal = text.slice(index).match(/^[0-7]{1,3}/)?.[0]
+        if (!octal || Number.parseInt(octal, 8) > 255) return undefined
+        bytes.push(Number.parseInt(octal, 8))
+        index += octal.length - 1
+      }
+    }
+    try {
+      value = new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes))
+    } catch {
+      return undefined
+    }
+  }
+  if (!value.startsWith(prefix) || value.length === prefix.length || value.includes("\0")) {
+    return undefined
+  }
+  return value.slice(prefix.length)
+}
+
+function mapDiff(diff) {
+  const files = []
+  let file
+  let hunk
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      file = undefined
+      hunk = undefined
+      continue
+    }
+    if (hunk) {
+      if (line.startsWith("\\ No newline at end of file")) continue
+      const kind = line[0]
+      const oldLine = kind === " " || kind === "-"
+      const newLine = kind === " " || kind === "+"
+      if (
+        (!oldLine && !newLine) ||
+        (oldLine && hunk.oldRemaining === 0) ||
+        (newLine && hunk.newRemaining === 0)
+      ) {
+        hunk = undefined
+        continue
+      }
+      if (kind === "-") hunk.LEFT.add(hunk.oldLine)
+      if (newLine) hunk.RIGHT.add(hunk.newLine)
+      if (oldLine) {
+        hunk.oldLine++
+        hunk.oldRemaining--
+      }
+      if (newLine) {
+        hunk.newLine++
+        hunk.newRemaining--
+      }
+      if (hunk.oldRemaining === 0 && hunk.newRemaining === 0) {
+        file.hunks.push(hunk)
+        hunk = undefined
+      }
+      continue
+    }
+    if (line.startsWith("--- ")) {
+      file = { oldPath: decodePath(line.slice(4), "a/"), newPath: undefined, hunks: [] }
+      files.push(file)
+    } else if (file && line.startsWith("+++ ")) {
+      file.newPath = decodePath(line.slice(4), "b/")
+    } else if (file) {
+      const match = line.match(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(?: |$)/)
+      if (!match) continue
+      const [, oldStart, oldCount = "1", newStart, newCount = "1"] = match
+      const values = [oldStart, oldCount, newStart, newCount].map(Number)
+      if (!values.every(Number.isSafeInteger)) continue
+      const [oldLine, oldRemaining, newLine, newRemaining] = values
+      if (
+        !Number.isSafeInteger(oldLine + oldRemaining) ||
+        !Number.isSafeInteger(newLine + newRemaining) ||
+        (oldRemaining > 0 && oldLine === 0) ||
+        (newRemaining > 0 && newLine === 0) ||
+        oldRemaining + newRemaining === 0
+      ) {
+        continue
+      }
+      hunk = { oldLine, oldRemaining, newLine, newRemaining, LEFT: new Set(), RIGHT: new Set() }
+    }
+  }
+  return files
+}
+
+function findAnchor(location, files) {
+  if (location === null) return null
+  const { path, line, side, start_line: start = line } = location
+  if (start > line) return null
+  const canonical = files.filter(
+    (file) => file.newPath === path || (file.newPath === null && file.oldPath === path),
+  )
+  const matches = canonical.length ? canonical : files.filter((file) => file.oldPath === path)
+  if (matches.length !== 1) return null
+  const file = matches[0]
+  // Both headers must decode. A rename uses the new path, including LEFT anchors.
+  if (file.oldPath === undefined || file.newPath === undefined) return null
+  const canonicalPath = file.newPath ?? file.oldPath
+  if (!canonicalPath) return null
+  const valid = file.hunks.some((hunk) => {
+    const lines = hunk[side]
+    if (line - start + 1 > lines.size) return false
+    for (let current = start; current <= line; current++) {
+      if (!lines.has(current)) return false
+    }
+    return true
+  })
+  if (!valid) return null
+  return {
+    path: canonicalPath,
+    line,
+    side,
+    ...(start < line ? { start_line: start, start_side: side } : {}),
+  }
+}
+
+function label(finding) {
+  return `${finding.severity[0].toUpperCase()}${finding.severity.slice(1)}: ${finding.title}`
+}
+
+function locationText(location) {
+  if (location === null) return "General finding"
+  const start = location.start_line
+  const range = start !== undefined && start !== location.line ? `${start}-` : ""
+  return `\`${location.path}:${range}${location.line} (${location.side})\``
+}
+
+function checkBody(body) {
+  if (body.length > bodyLimit) {
+    throw new Error("Review body exceeds GitHub's 65536-character limit.")
+  }
+  return body
+}
+
+export function buildReview(raw, diff, head) {
+  const output = validateOutput(raw)
+  if (typeof diff !== "string" || !isText(head)) {
+    throw new Error("The diff must be a string and the reviewed head must be non-empty text.")
+  }
+  const files = mapDiff(diff)
+  const comments = []
+  const anchored = []
+  const general = []
+  for (const finding of output.findings) {
+    const anchor = findAnchor(finding.location, files)
+    if (anchor) {
+      comments.push({
+        ...anchor,
+        body: checkBody(`<!-- pi-action:finding -->\n**${label(finding)}**\n\n${finding.body}`),
+      })
+      anchored.push(`- **${label(finding)}** — ${locationText(anchor)}`)
+    } else {
+      general.push(`### ${label(finding)}\n\n${locationText(finding.location)}\n\n${finding.body}`)
+    }
+  }
+  const sections = [
+    `${summaryMarker}\n## Pi review`,
+    `Reviewed head commit: \`${head}\``,
+    output.summary,
+    "This review covers only the supplied diff.",
+  ]
+  if (anchored.length) sections.push(`### Inline findings\n\n${anchored.join("\n")}`)
+  if (general.length) sections.push(`## Summary-only findings\n\n${general.join("\n\n")}`)
+  return { body: checkBody(sections.join("\n\n")), comments }
+}

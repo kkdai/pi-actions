@@ -2,6 +2,7 @@ import { execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
+import { buildReview, summaryMarker } from "./review-output.mjs"
 
 const defaultPrompt = ".pi/prompts/review-pull-request.md"
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
@@ -143,26 +144,62 @@ function reviewPullRequest() {
       { ...options, env: piEnv, cwd: directory },
     ).trim()
     if (!review) throw new Error("Pi returned an empty review.")
-    const body = `## Pi review\n\n${review}`
-    if (body.length > 65536) throw new Error("The review exceeds GitHub's comment size limit.")
+    const report = buildReview(review, diff, head)
+    const api = (args) => execFileSync("gh", ["api", ...args], options).trim()
+    const list = (endpoint) => JSON.parse(api([endpoint, "--paginate", "--slurp"])).flat()
+    const request = (method, endpoint, payload) => {
+      const requestPath = join(directory, "request.json")
+      writeFileSync(requestPath, JSON.stringify(payload))
+      return JSON.parse(api(["--method", method, endpoint, "--input", requestPath]))
+    }
+    const isPiBot = (comment) => comment.user?.login === "github-actions[bot]"
+    const commentKey = (comment) =>
+      JSON.stringify([
+        comment.path,
+        comment.original_line ?? comment.line,
+        comment.side,
+        comment.original_start_line ?? comment.start_line ?? null,
+        comment.start_side ?? null,
+        comment.body,
+      ])
 
-    const requestPath = join(directory, "review.json")
-    writeFileSync(requestPath, JSON.stringify({ body, event: "COMMENT", commit_id: head }))
-    const url = execFileSync(
-      "gh",
-      [
-        "api",
-        "--method",
-        "POST",
-        `${repository}/pulls/${number}/reviews`,
-        "--input",
-        requestPath,
-        "--jq",
-        ".html_url",
-      ],
-      options,
-    ).trim()
-    console.log(`Review posted: ${url}`)
+    const summaries = list(`${repository}/issues/${number}/comments`)
+    const previous = summaries.find(
+      (comment) => isPiBot(comment) && comment.body?.startsWith(summaryMarker),
+    )
+    const published = new Set(
+      (report.comments.length ? list(`${repository}/pulls/${number}/comments`) : [])
+        .filter((comment) => isPiBot(comment) && comment.original_commit_id === head)
+        .map(commentKey),
+    )
+    const comments = report.comments.filter((comment) => {
+      const key = commentKey(comment)
+      if (published.has(key)) return false
+      published.add(key)
+      return true
+    })
+
+    if (api([`${repository}/pulls/${number}`, "--jq", ".head.sha"]) !== head) {
+      throw new Error("The pull request head changed during review. Rerun on the latest commit.")
+    }
+    const summary = request(
+      previous ? "PATCH" : "POST",
+      previous
+        ? `${repository}/issues/comments/${previous.id}`
+        : `${repository}/issues/${number}/comments`,
+      { body: report.body },
+    )
+    console.log(`Summary ${previous ? "updated" : "posted"}: ${summary.html_url}`)
+
+    if (comments.length) {
+      const posted = request("POST", `${repository}/pulls/${number}/reviews`, {
+        body: `Inline findings for \`${head}\`. See the [Pi review summary](${summary.html_url}).`,
+        event: "COMMENT",
+        commit_id: head,
+        comments,
+      })
+      console.log(`Review posted: ${posted.html_url}`)
+    }
   } finally {
     rmSync(directory, { recursive: true, force: true })
   }
