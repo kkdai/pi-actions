@@ -51,4 +51,4 @@ runs:
         PI_MODEL: ${{ inputs.model }}
         PI_THINKING: ${{ inputs.thinking }}
         PI_PROMPT: ${{ inputs.prompt }}
-      run: node "$GITHUB_ACTION_PATH/../src/triage.mjs"
+      run: node "$GITHUB_ACTION_PATH/../dist/triage.js"

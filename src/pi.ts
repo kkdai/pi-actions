@@ -1,15 +1,25 @@
-import { execFileSync } from "node:child_process"
+import { type ExecFileSyncOptionsWithStringEncoding, execFileSync } from "node:child_process"
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"]
 
-export function escapeCommand(value) {
+type PiContext = {
+  directory: string
+  options: ExecFileSyncOptionsWithStringEncoding
+  run: (inputPath: string, instruction: string) => string
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value)
+}
+
+export function escapeCommand(value: string) {
   return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A")
 }
 
-function maskSecrets(value) {
+function maskSecrets(value: unknown): void {
   if (typeof value === "string" && value) {
     console.log(`::add-mask::${escapeCommand(value)}`)
   } else if (value && typeof value === "object") {
@@ -19,7 +29,10 @@ function maskSecrets(value) {
   }
 }
 
-export function withPi(defaultPrompt, task) {
+export function withPi<Result>(
+  defaultPrompt: string,
+  task: (context: PiContext) => Result,
+): Result {
   const env = process.env
   const provider = env.PI_PROVIDER?.trim()
   const model = env.PI_MODEL?.trim()
@@ -36,32 +49,38 @@ export function withPi(defaultPrompt, task) {
     throw new Error("base-url must use HTTP or HTTPS.")
   }
 
-  let credential = { type: "api_key", key: apiKey }
+  let credential: Record<string, unknown> = { type: "api_key", key: apiKey }
   if (authJson) {
-    let auth
+    let auth: unknown
     try {
       auth = JSON.parse(authJson)
     } catch {
       throw new Error("auth-json must contain valid JSON.")
     }
-    credential = auth?.[provider]
-    if (!credential || !["api_key", "oauth"].includes(credential.type)) {
+    const selected = isObject(auth) ? auth[provider] : undefined
+    if (!isObject(selected) || (selected.type !== "api_key" && selected.type !== "oauth")) {
       throw new Error("auth-json must contain an API key or OAuth credential for provider.")
     }
+    credential = selected
     if (credential.type === "api_key" && (typeof credential.key !== "string" || !credential.key)) {
       throw new Error("The selected auth-json API key must be a non-empty string.")
     }
   }
   maskSecrets(credential)
 
+  const workspace = env.GITHUB_WORKSPACE
+  const runnerTemp = env.RUNNER_TEMP
+  if (!workspace || !runnerTemp) {
+    throw new Error("GITHUB_WORKSPACE and RUNNER_TEMP are required.")
+  }
   const prompt = env.PI_PROMPT || defaultPrompt
-  let promptPath = resolve(env.GITHUB_WORKSPACE, prompt)
+  let promptPath = resolve(workspace, prompt)
   if (prompt === defaultPrompt && !existsSync(promptPath)) {
     promptPath = fileURLToPath(new URL(`../${defaultPrompt}`, import.meta.url))
   }
   if (!existsSync(promptPath)) throw new Error("The prompt file does not exist.")
 
-  const directory = mkdtempSync(join(env.RUNNER_TEMP, "pi-action-"))
+  const directory = mkdtempSync(join(runnerTemp, "pi-action-"))
   try {
     writeFileSync(join(directory, "auth.json"), JSON.stringify({ [provider]: credential }), {
       mode: 0o600,
@@ -76,11 +95,19 @@ export function withPi(defaultPrompt, task) {
     const commandEnv = { ...env }
     delete commandEnv.PI_API_KEY
     delete commandEnv.PI_AUTH_JSON
-    const options = { encoding: "utf8", env: commandEnv, maxBuffer: 20 * 1024 * 1024 }
-    const piEnv = { ...commandEnv, PI_CODING_AGENT_DIR: directory, PI_SKIP_VERSION_CHECK: "1" }
+    const options: ExecFileSyncOptionsWithStringEncoding = {
+      encoding: "utf8",
+      env: commandEnv,
+      maxBuffer: 20 * 1024 * 1024,
+    }
+    const piEnv: NodeJS.ProcessEnv = {
+      ...commandEnv,
+      PI_CODING_AGENT_DIR: directory,
+      PI_SKIP_VERSION_CHECK: "1",
+    }
     delete piEnv.GH_TOKEN
     delete piEnv.GITHUB_TOKEN
-    const run = (inputPath, instruction) =>
+    const run = (inputPath: string, instruction: string) =>
       execFileSync(
         "pi",
         [

@@ -22,3 +22,7 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run ci
+      - name: Check compiled action files
+        run: |
+          git diff --exit-code -- dist
+          test -z "$(git ls-files --others --exclude-standard -- dist)"

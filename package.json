@@ -1,13 +1,16 @@
 {
-  "name": "typescript-template",
+  "name": "pi-action",
   "version": "0.0.0",
+  "description": "GitHub Actions for pull request review and issue triage with Pi.",
+  "private": true,
+  "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/narumiruna/typescript-template.git"
+    "url": "git+https://github.com/narumiruna/pi-action.git"
   },
   "scripts": {
     "build": "tsc",
-    "start": "node dist/index.js",
+    "pretest": "npm run build",
     "check": "biome ci .",
     "test": "vitest run",
     "ci": "npm run check && npm test && npm run build",
@@ -18,6 +21,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.6.4",
     "@changesets/cli": "^3.0.3",
+    "@types/node": "^26.6.6",
     "husky": "^9.1.7",
     "typescript": "^7.0.2",
     "vitest": "^5.0.5"

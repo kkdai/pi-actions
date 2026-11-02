@@ -127,15 +127,29 @@ without an exact diff location. Plain Markdown output is not supported.
 
 ## Development
 
-Action runtime modules are in `src/`: `review.mjs`, `review-output.mjs`,
-`triage.mjs`, and the shared `pi.mjs`. Both composite actions run these `.mjs`
-files directly; no build is required to use the actions. Development tools,
-such as `pre-commit.sh`, remain in `scripts/`.
+Action runtime sources are in `src/`: `review.ts`, `review-output.ts`,
+`triage.ts`, and the shared `pi.ts`. TypeScript compiles them to ESM JavaScript
+in `dist/`. Both composite actions run the committed `dist/` files, so action
+users do not need to install development dependencies or build the action.
+Bundled prompts remain in `.pi/prompts/`. Development tools remain in `scripts/`.
+
+This is a private development package for the GitHub Actions. It does not expose
+a supported npm library API.
 
 ```sh
 npm ci
 npm run ci
 ```
+
+`npm run build` compiles the runtime with strict type checks. `npm test` builds
+before running tests against the compiled files. Commit `dist/*.js` with every
+source change; do not edit generated JavaScript directly. CI rebuilds the action
+and rejects changed or untracked files in `dist/`.
+
+Distribution tests run each manifest command from a copied action directory
+that contains only `dist/`, `package.json`, and bundled prompts. They also check
+missing runtime modules and prompts. No caller checkout or local build tools
+are required to use the committed action revision.
 
 ### Verify GitHub comments
 

@@ -1,14 +1,63 @@
 export const summaryMarker = "<!-- pi-action:summary -->"
 
-const severities = ["critical", "high", "medium", "low"]
-const sides = ["LEFT", "RIGHT"]
+const severities = ["critical", "high", "medium", "low"] as const
+const sides = ["LEFT", "RIGHT"] as const
 const bodyLimit = 65536
 
-function isObject(value) {
+type Severity = (typeof severities)[number]
+type Side = (typeof sides)[number]
+
+type FindingLocation = {
+  path: string
+  line: number
+  side: Side
+  start_line?: number
+}
+
+type Finding = {
+  severity: Severity
+  title: string
+  body: string
+  location: FindingLocation | null
+}
+
+type ReviewOutput = {
+  summary: string
+  findings: Finding[]
+}
+
+type DiffHunk = {
+  oldLine: number
+  oldRemaining: number
+  newLine: number
+  newRemaining: number
+  LEFT: Set<number>
+  RIGHT: Set<number>
+}
+
+type DiffFile = {
+  oldPath: string | null | undefined
+  newPath: string | null | undefined
+  hunks: DiffHunk[]
+}
+
+type ReviewAnchor = FindingLocation & {
+  start_side?: Side
+}
+
+export type ReviewComment = ReviewAnchor & {
+  body: string
+}
+
+function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-function hasShape(value, required, optional = []) {
+function hasShape(
+  value: unknown,
+  required: string[],
+  optional: string[] = [],
+): value is Record<string, unknown> {
   return (
     isObject(value) &&
     required.every((key) => Object.hasOwn(value, key)) &&
@@ -16,16 +65,16 @@ function hasShape(value, required, optional = []) {
   )
 }
 
-function isText(value) {
+function isText(value: unknown): value is string {
   return typeof value === "string" && value.trim().length > 0
 }
 
-function isLine(value) {
-  return Number.isSafeInteger(value) && value > 0
+function isLine(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
 }
 
-function validateOutput(raw) {
-  let output
+function validateOutput(raw: unknown): ReviewOutput {
+  let output: unknown
   try {
     if (typeof raw !== "string") throw new Error()
     output = JSON.parse(raw)
@@ -39,10 +88,11 @@ function validateOutput(raw) {
   ) {
     throw new Error("Invalid review schema: expected summary and findings.")
   }
-  for (const finding of output.findings) {
+  const findings: unknown[] = output.findings
+  for (const finding of findings) {
     if (
       !hasShape(finding, ["severity", "title", "body", "location"]) ||
-      !severities.includes(finding.severity) ||
+      !severities.some((severity) => severity === finding.severity) ||
       !isText(finding.title) ||
       !isText(finding.body)
     ) {
@@ -54,25 +104,36 @@ function validateOutput(raw) {
       (!hasShape(location, ["path", "line", "side"], ["start_line"]) ||
         !isText(location.path) ||
         !isLine(location.line) ||
-        !sides.includes(location.side) ||
+        !sides.some((side) => side === location.side) ||
         (Object.hasOwn(location, "start_line") && !isLine(location.start_line)))
     ) {
       throw new Error("Invalid review schema: invalid location.")
     }
   }
-  return output
+  // The schema and every finding and location have been validated above.
+  return output as ReviewOutput
 }
 
 // Git quotes paths with C escapes and octal UTF-8 bytes, not JSON escapes.
-function decodePath(value, prefix) {
+function decodePath(value: string, prefix: string): string | null | undefined {
   // Git adds a tab delimiter after unquoted header paths that contain spaces.
   if (value.endsWith("\t")) value = value.slice(0, -1)
   if (value.includes("\t")) return undefined
   if (value === "/dev/null") return null
   if (value.startsWith('"')) {
     if (!value.endsWith('"')) return undefined
-    const bytes = []
-    const escapes = { a: 7, b: 8, t: 9, n: 10, v: 11, f: 12, r: 13, '"': 34, "\\": 92 }
+    const bytes: number[] = []
+    const escapes: Record<string, number> = {
+      a: 7,
+      b: 8,
+      t: 9,
+      n: 10,
+      v: 11,
+      f: 12,
+      r: 13,
+      '"': 34,
+      "\\": 92,
+    }
     const encoder = new TextEncoder()
     const text = value.slice(1, -1)
     for (let index = 0; index < text.length; index++) {
@@ -80,6 +141,7 @@ function decodePath(value, prefix) {
       if (character === '"') return undefined
       if (character !== "\\") {
         const point = text.codePointAt(index)
+        if (point === undefined) return undefined
         bytes.push(...encoder.encode(String.fromCodePoint(point)))
         if (point > 0xffff) index++
         continue
@@ -106,17 +168,17 @@ function decodePath(value, prefix) {
   return value.slice(prefix.length)
 }
 
-function mapDiff(diff) {
-  const files = []
-  let file
-  let hunk
+function mapDiff(diff: string): DiffFile[] {
+  const files: DiffFile[] = []
+  let file: DiffFile | undefined
+  let hunk: DiffHunk | undefined
   for (const line of diff.split("\n")) {
     if (line.startsWith("diff --git ")) {
       file = undefined
       hunk = undefined
       continue
     }
-    if (hunk) {
+    if (hunk && file) {
       if (line.startsWith("\\ No newline at end of file")) continue
       const kind = line[0]
       const oldLine = kind === " " || kind === "-"
@@ -172,7 +234,7 @@ function mapDiff(diff) {
   return files
 }
 
-function findAnchor(location, files) {
+function findAnchor(location: FindingLocation | null, files: DiffFile[]): ReviewAnchor | null {
   if (location === null) return null
   const { path, line, side, start_line: start = line } = location
   if (start > line) return null
@@ -203,33 +265,33 @@ function findAnchor(location, files) {
   }
 }
 
-function label(finding) {
+function label(finding: Finding) {
   return `${finding.severity[0].toUpperCase()}${finding.severity.slice(1)}: ${finding.title}`
 }
 
-function locationText(location) {
+function locationText(location: FindingLocation | null) {
   if (location === null) return "General finding"
   const start = location.start_line
   const range = start !== undefined && start !== location.line ? `${start}-` : ""
   return `\`${location.path}:${range}${location.line} (${location.side})\``
 }
 
-function checkBody(body) {
+function checkBody(body: string) {
   if (body.length > bodyLimit) {
     throw new Error("Review body exceeds GitHub's 65536-character limit.")
   }
   return body
 }
 
-export function buildReview(raw, diff, head) {
+export function buildReview(raw: unknown, diff: unknown, head: unknown) {
   const output = validateOutput(raw)
   if (typeof diff !== "string" || !isText(head)) {
     throw new Error("The diff must be a string and the reviewed head must be non-empty text.")
   }
   const files = mapDiff(diff)
-  const comments = []
-  const anchored = []
-  const general = []
+  const comments: ReviewComment[] = []
+  const anchored: string[] = []
+  const general: string[] = []
   for (const finding of output.findings) {
     const anchor = findAnchor(finding.location, files)
     if (anchor) {
