@@ -19,6 +19,18 @@ const head = "b".repeat(40)
 const diff =
   "diff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n"
 
+const summaryMarker = "<!-- pi-action:summary -->"
+const noFindings = { summary: "No actionable findings found in the supplied diff.", findings: [] }
+const finding = {
+  severity: "high",
+  title: "Preserve the expected behavior",
+  body: "The changed line breaks the existing behavior. Restore the original behavior.",
+  location: { path: "example.ts", line: 1, side: "RIGHT" },
+}
+const inlineBody = `<!-- pi-action:finding -->\n**High: ${finding.title}**\n\n${finding.body}`
+const bot = { login: "github-actions[bot]", type: "Bot" }
+const withFinding = JSON.stringify({ summary: "One issue found.", findings: [finding] })
+
 const mockCommand = String.raw`#!/usr/bin/env node
 const { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } = require("node:fs");
 const { basename, join } = require("node:path");
@@ -32,14 +44,34 @@ function fail(stage) {
     process.exit(1);
   }
 }
-if (command === "gh" && !args.includes("POST")) {
-  fail("fetch");
-  process.stdout.write(env.MOCK_EMPTY_DIFF ? "" : env.MOCK_DIFF);
-} else if (command === "gh") {
-  fail("post");
-  const request = readFileSync(args[args.indexOf("--input") + 1], "utf8");
-  writeFileSync(join(env.MOCK_ROOT, "posted.json"), request);
-  console.log("https://github.com/owner/repo/pull/42#pullrequestreview-1");
+if (command === "gh") {
+  const endpoint = args.find(value => value.startsWith("repos/"));
+  const method = args.includes("--method") ? args[args.indexOf("--method") + 1] : "GET";
+  if (endpoint.includes("/compare/")) {
+    fail("fetch");
+    process.stdout.write(env.MOCK_EMPTY_DIFF ? "" : env.MOCK_DIFF);
+  } else if (method === "GET" && endpoint.endsWith("/issues/42/comments")) {
+    fail("list-summaries");
+    process.stdout.write(env.MOCK_SUMMARIES);
+  } else if (method === "GET" && endpoint.endsWith("/pulls/42/comments")) {
+    fail("list-inline");
+    process.stdout.write(env.MOCK_INLINE_COMMENTS);
+  } else if (method === "GET" && endpoint.endsWith("/pulls/42")) {
+    fail("head");
+    process.stdout.write(env.MOCK_CURRENT_HEAD);
+  } else if (method === "POST" && endpoint.endsWith("/reviews")) {
+    fail("review");
+    writeFileSync(join(env.MOCK_ROOT, "posted.json"), readFileSync(args[args.indexOf("--input") + 1], "utf8"));
+    console.log(JSON.stringify({ id: 1, html_url: "https://github.com/owner/repo/pull/42#pullrequestreview-1" }));
+  } else if ((method === "POST" && endpoint.endsWith("/issues/42/comments")) ||
+    (method === "PATCH" && endpoint.includes("/issues/comments/"))) {
+    fail("summary");
+    writeFileSync(join(env.MOCK_ROOT, "summary.json"), readFileSync(args[args.indexOf("--input") + 1], "utf8"));
+    const id = method === "PATCH" ? Number(endpoint.split("/").pop()) : 99;
+    console.log(JSON.stringify({ id, html_url: "https://github.com/owner/repo/pull/42#issuecomment-" + id }));
+  } else {
+    throw new Error("Unexpected GitHub request: " + JSON.stringify(args));
+  }
 } else {
   const directory = env.PI_CODING_AGENT_DIR;
   const modelPath = join(directory, "models.json");
@@ -57,7 +89,7 @@ if (command === "gh" && !args.includes("POST")) {
     authJsonInput: env.PI_AUTH_JSON,
   }));
   fail("pi");
-  process.stdout.write(env.MOCK_EMPTY_REVIEW ? "" : "No actionable findings found in the supplied diff.");
+  process.stdout.write(env.MOCK_EMPTY_REVIEW ? "" : env.MOCK_REVIEW);
 }
 `
 
@@ -103,6 +135,10 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
       PI_PROMPT: ".pi/prompts/review-pull-request.md",
       MOCK_ROOT: root,
       MOCK_DIFF: diff,
+      MOCK_REVIEW: JSON.stringify(noFindings),
+      MOCK_SUMMARIES: "[[]]",
+      MOCK_INLINE_COMMENTS: "[[]]",
+      MOCK_CURRENT_HEAD: head,
       ...overrides,
     },
   })
@@ -160,12 +196,15 @@ test("reviews the event's exact commits with the API key and bundled prompt", ()
   for (const name of ["githubToken", "alternateToken", "apiKeyInput", "authJsonInput"]) {
     expect(pi[name]).toBeUndefined()
   }
-  expect(json("posted.json")).toEqual({
-    body: "## Pi review\n\nNo actionable findings found in the supplied diff.",
-    event: "COMMENT",
-    commit_id: head,
-  })
-  expect(result.stdout).toContain("Review posted: https://github.com/owner/repo/pull/42")
+  const summary = json("summary.json")
+  expect(summary).toEqual({ body: expect.stringContaining(summaryMarker) })
+  expect(summary.body).toContain(noFindings.summary)
+  expect(summary.body).toContain(head)
+  expect(summary.body).toContain("This review covers only the supplied diff.")
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+  expect(result.stdout).toContain(
+    "Summary posted: https://github.com/owner/repo/pull/42#issuecomment-99",
+  )
 })
 
 test("loads only the selected OAuth credential from auth-json", () => {
@@ -259,12 +298,16 @@ test.each([
   expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
 })
 
-test.each(["fetch", "pi", "post"])("cleans credentials after a %s failure", (stage) => {
-  const { result, root } = runAction({ MOCK_FAILURE: stage })
-  expect(result.status).toBe(1)
-  expect(result.stderr).toContain(`mock ${stage} failure`)
-  expect(existsSync(join(root, "posted.json"))).toBe(false)
-})
+test.each(["fetch", "pi", "list-summaries", "head", "summary"])(
+  "cleans credentials after a %s failure",
+  (stage) => {
+    const { result, root } = runAction({ MOCK_FAILURE: stage })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(`mock ${stage} failure`)
+    expect(existsSync(join(root, "summary.json"))).toBe(false)
+    expect(existsSync(join(root, "posted.json"))).toBe(false)
+  },
+)
 
 test.each([
   [{ MOCK_EMPTY_DIFF: "1" }, "diff is empty"],
@@ -273,5 +316,216 @@ test.each([
   const { result, root } = runAction(overrides)
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(message)
+  expect(existsSync(join(root, "summary.json"))).toBe(false)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+function commands(root: string) {
+  return readFileSync(join(root, "commands.jsonl"), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+}
+
+test("creates the summary before submitting inline comments at the exact head", () => {
+  const { result, json, root } = runAction({ MOCK_REVIEW: withFinding })
+  expect(result.status, result.stderr).toBe(0)
+  const posted = json("posted.json")
+  expect(posted).toEqual({
+    body: expect.stringContaining("#issuecomment-99"),
+    event: "COMMENT",
+    commit_id: head,
+    comments: [{ path: "example.ts", line: 1, side: "RIGHT", body: inlineBody }],
+  })
+  const calls = commands(root)
+  const writes = calls.filter((call) => call.args.includes("POST"))
+  expect(writes.map((call) => call.args[3])).toEqual([
+    "repos/owner/repo/issues/42/comments",
+    "repos/owner/repo/pulls/42/reviews",
+  ])
+  for (const endpoint of ["issues/42/comments", "pulls/42/comments"]) {
+    expect(calls).toContainEqual({
+      command: "gh",
+      args: ["api", `repos/owner/repo/${endpoint}`, "--paginate", "--slurp"],
+    })
+  }
+})
+
+test("updates the first Pi summary across paginated comments and preserves other authors", () => {
+  const pages = [
+    [
+      { id: 1, user: { login: "owner", type: "User" }, body: summaryMarker },
+      { id: 2, user: { login: "other[bot]", type: "Bot" }, body: summaryMarker },
+      { id: 3, user: bot, body: "Another workflow comment." },
+    ],
+    [
+      { id: 4, user: bot, body: `${summaryMarker}\nOld finding.` },
+      { id: 5, user: bot, body: `${summaryMarker}\nDuplicate old summary.` },
+    ],
+  ]
+  const { result, root, json } = runAction({ MOCK_SUMMARIES: JSON.stringify(pages) })
+  expect(result.status, result.stderr).toBe(0)
+  const writes = commands(root).filter(
+    (call) => call.args.includes("PATCH") || call.args.includes("POST"),
+  )
+  expect(writes).toHaveLength(1)
+  expect(writes[0].args.slice(0, 4)).toEqual([
+    "api",
+    "--method",
+    "PATCH",
+    "repos/owner/repo/issues/comments/4",
+  ])
+  expect(json("summary.json").body).not.toContain("Old finding.")
+  expect(result.stdout).toContain("Summary updated:")
+})
+
+test("does not replace a human or another bot comment that contains the summary marker", () => {
+  const pages = [
+    [
+      { id: 1, user: { login: "owner", type: "User" }, body: summaryMarker },
+      { id: 2, user: { login: "other[bot]", type: "Bot" }, body: summaryMarker },
+    ],
+  ]
+  const { result, root } = runAction({ MOCK_SUMMARIES: JSON.stringify(pages) })
+  expect(result.status, result.stderr).toBe(0)
+  expect(commands(root).some((call) => call.args.includes("PATCH"))).toBe(false)
+  expect(result.stdout).toContain("Summary posted:")
+})
+
+test("posts multiline and deleted-line findings using GitHub review coordinates", () => {
+  const rangedDiff = [
+    "diff --git a/example.ts b/example.ts",
+    "--- a/example.ts",
+    "+++ b/example.ts",
+    "@@ -8,2 +8,3 @@",
+    " context",
+    "-removed",
+    "+first",
+    "+second",
+    "",
+  ].join("\n")
+  const { result, json } = runAction({
+    MOCK_DIFF: rangedDiff,
+    MOCK_REVIEW: JSON.stringify({
+      summary: "Two issues found.",
+      findings: [
+        { ...finding, location: { path: "example.ts", line: 10, start_line: 9, side: "RIGHT" } },
+        { ...finding, location: { path: "example.ts", line: 9, side: "LEFT" } },
+      ],
+    }),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(json("posted.json").comments).toEqual([
+    {
+      path: "example.ts",
+      line: 10,
+      side: "RIGHT",
+      start_line: 9,
+      start_side: "RIGHT",
+      body: inlineBody,
+    },
+    { path: "example.ts", line: 9, side: "LEFT", body: inlineBody },
+  ])
+})
+
+test("keeps an out-of-diff finding in the summary without posting an invalid inline review", () => {
+  const { result, json, root } = runAction({
+    MOCK_REVIEW: JSON.stringify({
+      summary: "One issue found.",
+      findings: [{ ...finding, location: { ...finding.location, line: 999 } }],
+    }),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(json("summary.json").body).toContain(finding.body)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+const postedFinding = {
+  user: bot,
+  commit_id: head,
+  original_commit_id: head,
+  path: "example.ts",
+  line: null,
+  original_line: 1,
+  side: "RIGHT",
+  start_line: null,
+  original_start_line: null,
+  start_side: null,
+  body: inlineBody,
+}
+
+test("updates the summary but skips identical inline findings already posted at the same head", () => {
+  const { result, root } = runAction({
+    MOCK_REVIEW: withFinding,
+    MOCK_INLINE_COMMENTS: JSON.stringify([[], [postedFinding]]),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(existsSync(join(root, "summary.json"))).toBe(true)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+test("uses the original commit and coordinates when GitHub remaps an existing finding", () => {
+  const { result, root } = runAction({
+    MOCK_REVIEW: withFinding,
+    MOCK_INLINE_COMMENTS: JSON.stringify([
+      [{ ...postedFinding, commit_id: base, line: 42, original_line: 1 }],
+    ]),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(existsSync(join(root, "summary.json"))).toBe(true)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+test.each([
+  { original_commit_id: base },
+  { user: { login: "other[bot]", type: "Bot" } },
+  { body: "A different finding." },
+  { original_line: 2 },
+])("does not suppress a new inline finding because of a different comment %j", (override) => {
+  const { result, json } = runAction({
+    MOCK_REVIEW: withFinding,
+    MOCK_INLINE_COMMENTS: JSON.stringify([[{ ...postedFinding, ...override }]]),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(json("posted.json").comments).toHaveLength(1)
+})
+
+test("does not submit duplicate inline findings in the same batch", () => {
+  const { result, json } = runAction({
+    MOCK_REVIEW: JSON.stringify({ summary: "One issue found.", findings: [finding, finding] }),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(json("posted.json").comments).toHaveLength(1)
+})
+
+test("does not publish a stale summary or inline review if the pull request head changes", () => {
+  const { result, root } = runAction({ MOCK_REVIEW: withFinding, MOCK_CURRENT_HEAD: base })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("head changed")
+  expect(existsSync(join(root, "summary.json"))).toBe(false)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+test("rejects invalid model output before making comment API requests", () => {
+  const { result, root } = runAction({ MOCK_REVIEW: "Not JSON." })
+  expect(result.status).toBe(1)
+  expect(commands(root).filter((call) => call.command === "gh")).toHaveLength(1)
+  expect(existsSync(join(root, "summary.json"))).toBe(false)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+test("cleans credentials without writes when listing inline comments fails", () => {
+  const { result, root } = runAction({ MOCK_REVIEW: withFinding, MOCK_FAILURE: "list-inline" })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("mock list-inline failure")
+  expect(existsSync(join(root, "summary.json"))).toBe(false)
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+test("cleans credentials and reports failure if inline submission fails after the summary update", () => {
+  const { result, root } = runAction({ MOCK_REVIEW: withFinding, MOCK_FAILURE: "review" })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("mock review failure")
+  expect(existsSync(join(root, "summary.json"))).toBe(true)
   expect(existsSync(join(root, "posted.json"))).toBe(false)
 })

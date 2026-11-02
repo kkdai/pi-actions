@@ -1,8 +1,8 @@
 # Pi Pull Request Review
 
 Use [pi-coding-agent](https://github.com/earendil-works/pi) to review a pull request
-diff and post a GitHub comment review. The action does not approve or reject pull
-requests.
+diff, update a summary comment, and post inline review comments on code. The action
+does not approve or reject pull requests.
 
 ## Usage
 
@@ -86,17 +86,41 @@ To supply a repository prompt, check out a trusted revision before the action an
 set `prompt` to the Markdown file path. Do not load prompts from an untrusted pull
 request head.
 
+Custom prompts must return a JSON object with `summary` and `findings`, as defined
+in the bundled prompt. Each finding contains `severity`, `title`, `body`, and
+`location`. A location contains `path`, `line`, `side` (`LEFT` or `RIGHT`), and an
+optional `start_line` for a multiline range. Use `location: null` for a finding
+without an exact diff location. Plain Markdown output is not supported.
+
+## Review comments
+
+- The first run creates a Pi summary comment in the PR conversation. Later runs
+  update that same comment with the reviewed commit, summary, and current findings.
+  Only Pi's marked `github-actions[bot]` comments can be updated. User comments
+  and historical reviews are not changed.
+- The summary keeps its original position. GitHub does not let the action insert
+  a new comment before existing comments or move it to the top of the conversation.
+- Findings with valid diff locations become inline review threads. Single lines,
+  multiline ranges, and removed lines are supported. Findings without valid
+  locations remain in the summary with their full explanation.
+- Inline findings are submitted together as a `COMMENT` review at the event's
+  head commit. Identical findings at that commit are not posted twice. Findings
+  at a new commit can create new threads; old threads are not deleted or resolved.
+- A run with no findings only updates the summary. It does not post an empty review.
+
 ## Review limits
 
 - Only `pull_request` events are supported. Fork workflows normally have no secrets
-  and a read-only token; the example skips them.
-- Reviews use the diff between the event's base and head commits and are attached
-  to that head commit.
+  and a read-only token, so the example cannot review fork pull requests.
+- Reviews use the diff between the event's base and head commits. If the PR head
+  changes before publication, the run fails without publishing its result.
 - Pi runs without tools, extensions, skills, project configuration, or session
   storage. It does not run pull request code or inspect files outside the diff.
 - GitHub diff limits and model context limits apply. The review covers only the
-  returned diff. Retrieval and model errors fail the action.
-- Each run posts a new comment review. Findings do not fail the action.
+  returned diff. Retrieval errors, invalid model output, oversized comments, and
+  GitHub API errors fail the action. Findings alone do not fail the action.
+- The summary is saved before inline submission. If inline submission fails, the
+  summary can already exist; rerun the workflow to complete publication.
 
 ## Development
 
@@ -104,3 +128,15 @@ request head.
 npm ci
 npm run ci
 ```
+
+### Verify GitHub comments
+
+Use a test PR to check the rendered comments after pushing an action revision:
+
+1. Add known findings on an added line, a removed line, and a multiline range.
+   Run a trusted workflow with the new action revision. Check the summary and
+   the inline thread locations.
+2. Run it again at the same head commit. Check that the summary comment ID is
+   unchanged and identical inline findings are not duplicated.
+3. Push a new commit. Check that the same summary shows the new head and that new
+   inline comments are attached to it. Keep intentionally broken test PRs as drafts.
