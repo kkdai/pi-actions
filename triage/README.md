@@ -53,6 +53,10 @@ that path takes precedence over the bundled copy. Other prompt paths must exist
 in the workspace. To use a repository prompt, check out a trusted revision before
 the action and set `prompt` to its Markdown file path.
 
+The bundled prompt uses only `bug`, `documentation`, `enhancement`, and `question`
+for automatic issue classification. It excludes labels that need maintainer
+judgment or pull request context. Custom prompts can select other existing labels.
+
 Custom prompts receive JSON containing `issue.title`, `issue.body`, and all
 repository label names and descriptions in `labels`. They must return only this
 JSON structure, using exact names of existing labels:
@@ -80,8 +84,8 @@ non-JSON output fail the action before any labels are applied.
 - Only missing selected labels are added. Existing labels are preserved, including
   labels added during classification. Repeated runs do not duplicate labels.
   A maintainer must remove incorrect or outdated labels.
-- All repository labels are candidates. Model classification can be incorrect;
-  do not use an applied label as authorization for a privileged workflow.
+- Model classification can be incorrect. Do not use an applied label as
+  authorization for a privileged workflow.
 - GitHub API errors, model errors, invalid output, and context limits can fail the
   action. The action does not retry failed writes automatically.
 

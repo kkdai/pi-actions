@@ -278,6 +278,15 @@ test("classifies the live issue with isolated API key auth and the bundled promp
   expect(posted).toEqual({ labels: ["bug", "needs docs"] })
 })
 
+test("the bundled prompt lists only the four automatic issue-type labels", () => {
+  const { result, pi } = runAction({ MOCK_SELECTION: '{"labels":["bug"]}' })
+  expect(result.status, result.stderr).toBe(0)
+  const promptPath = pi.args[pi.args.indexOf("--system-prompt") + 1]
+  const prompt = readFileSync(promptPath, "utf8")
+  const supported = [...prompt.matchAll(/^- `([^`]+)`:/gm)].map((match) => match[1])
+  expect(supported).toEqual(["bug", "documentation", "enhancement", "question"])
+})
+
 test.each(["opened", "edited", "reopened"])("accepts the %s issue activity", (action) => {
   const { result, posted } = runAction({}, { event: { action, issue: { number: 42 } } })
   expect(result.status, result.stderr).toBe(0)
