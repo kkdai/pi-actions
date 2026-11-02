@@ -278,6 +278,32 @@ test("classifies the live issue with isolated API key auth and the bundled promp
   expect(posted).toEqual({ labels: ["bug", "needs docs"] })
 })
 
+test("keeps quoted issue content and label names in JSON files, not command arguments", () => {
+  const quotedIssue = {
+    ...issue,
+    title: 'Failure in "quoted" input: $(touch injected)',
+    body: '```sh\nprintf "%s" "$HOME"\n```\n::error::untrusted issue text\n',
+  }
+  const quotedLabel = { name: 'needs "docs", please', description: "A quoted label name." }
+  const { result, calls, pi, posted, workspace } = runAction({
+    MOCK_ISSUE: JSON.stringify(quotedIssue),
+    MOCK_LATEST_ISSUE: JSON.stringify(quotedIssue),
+    MOCK_LABELS: JSON.stringify([[quotedLabel]]),
+    MOCK_SELECTION: JSON.stringify({ labels: [quotedLabel.name] }),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(pi.attachment).toEqual({
+    issue: { title: quotedIssue.title, body: quotedIssue.body },
+    labels: [quotedLabel],
+  })
+  expect(posted).toEqual({ labels: [quotedLabel.name] })
+  const argumentsJson = JSON.stringify(calls.map((call) => call.args))
+  for (const content of [quotedIssue.title, quotedIssue.body, quotedLabel.name]) {
+    expect(argumentsJson).not.toContain(JSON.stringify(content).slice(1, -1))
+  }
+  expect(existsSync(join(workspace, "injected"))).toBe(false)
+})
+
 test("the bundled prompt lists only the four automatic issue-type labels", () => {
   const { result, pi } = runAction({ MOCK_SELECTION: '{"labels":["bug"]}' })
   expect(result.status, result.stderr).toBe(0)
@@ -355,6 +381,30 @@ test("rejects a pull request returned by the initial issue fetch", () => {
   expect(posted).toBeUndefined()
 })
 
+test.each([
+  ["malformed JSON", "Not JSON."],
+  ["null response", "null"],
+  ["array response", "[]"],
+  ["wrong issue number", JSON.stringify({ ...issue, number: 43 })],
+  ["non-string title", JSON.stringify({ ...issue, title: null })],
+  ["non-string body", JSON.stringify({ ...issue, body: 7 })],
+  ["missing body", JSON.stringify({ ...issue, body: undefined })],
+  ["invalid state", JSON.stringify({ ...issue, state: "deleted" })],
+  ["missing labels", JSON.stringify({ ...issue, labels: undefined })],
+  ["non-array labels", JSON.stringify({ ...issue, labels: {} })],
+  ["null label", JSON.stringify({ ...issue, labels: [null] })],
+  ["non-object label", JSON.stringify({ ...issue, labels: ["bug"] })],
+  ["non-string label name", JSON.stringify({ ...issue, labels: [{ name: 7 }] })],
+])("rejects %s from both issue fetches without writing", (_name, response) => {
+  for (const input of ["MOCK_ISSUE", "MOCK_LATEST_ISSUE"]) {
+    const { result, calls, pi, posted } = runAction({ [input]: response })
+    expect(result.status).toBe(1)
+    expect(stages(calls)).toEqual(input === "MOCK_ISSUE" ? [`GET ${issueEndpoint}`] : refreshed)
+    if (input === "MOCK_ISSUE") expect(pi).toBeUndefined()
+    expect(posted).toBeUndefined()
+  }
+})
+
 test("normalizes a null live issue body to an empty attachment string", () => {
   const emptyBodyIssue = JSON.stringify({ ...issue, body: null })
   const { result, pi } = runAction({
@@ -378,6 +428,24 @@ test("normalizes a null label description in the classification input", () => {
 test("skips Pi and writes when all repository label pages are empty", () => {
   const { result, calls, pi, posted } = runAction({ MOCK_LABELS: "[[],[]]" })
   expect(result.status, result.stderr).toBe(0)
+  expect(stages(calls)).toEqual([`GET ${issueEndpoint}`, `GET ${labelsEndpoint}`])
+  expect(pi).toBeUndefined()
+  expect(posted).toBeUndefined()
+})
+
+test.each([
+  ["malformed JSON", "Not JSON."],
+  ["non-array pages", "{}"],
+  ["non-array page", "[{}]"],
+  ["null label", "[[null]]"],
+  ["non-object label", '[["bug"]]'],
+  ["missing label name", "[[{}]]"],
+  ["blank label name", JSON.stringify([[{ name: "  " }]])],
+  ["non-string label name", JSON.stringify([[{ name: 7 }]])],
+  ["non-string description", JSON.stringify([[{ name: "bug", description: 7 }]])],
+])("rejects repository labels with %s before Pi or writes", (_name, response) => {
+  const { result, calls, pi, posted } = runAction({ MOCK_LABELS: response })
+  expect(result.status).toBe(1)
   expect(stages(calls)).toEqual([`GET ${issueEndpoint}`, `GET ${labelsEndpoint}`])
   expect(pi).toBeUndefined()
   expect(posted).toBeUndefined()

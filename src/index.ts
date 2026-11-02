@@ -1,3 +1,3 @@
-import { printHelloWorld } from "./hello.js";
+import { printHelloWorld } from "./hello.js"
 
-printHelloWorld();
+printHelloWorld()
