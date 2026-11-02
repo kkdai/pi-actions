@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process"
 import {
+  cpSync,
   existsSync,
   mkdirSync,
   mkdtempSync,
@@ -12,7 +13,10 @@ import { tmpdir } from "node:os"
 import { join, resolve, sep } from "node:path"
 import { afterEach, expect, test } from "vitest"
 
-const script = resolve("triage/triage.mjs")
+const actionPath = resolve("triage")
+const runCommand = readFileSync(join(actionPath, "action.yml"), "utf8").match(
+  /^ {6}run: (node .+)$/m,
+)?.[1]
 const defaultPrompt = ".pi/prompts/triage-issue.md"
 const issueEndpoint = "repos/owner/repo/issues/42"
 const labelsEndpoint = "repos/owner/repo/labels"
@@ -165,6 +169,7 @@ function runAction(
     PATH: `${bin}:${process.env.PATH}`,
     GH_TOKEN: "github-token",
     GITHUB_TOKEN: "alternate-github-token",
+    GITHUB_ACTION_PATH: actionPath,
     GITHUB_EVENT_NAME: "issues",
     GITHUB_EVENT_PATH: eventPath,
     GITHUB_REPOSITORY: "owner/repo",
@@ -192,12 +197,16 @@ function runAction(
       rmSync(join(root, name), { force: true })
     }
     writeFileSync(join(root, "fetch-count"), "0")
-    const result = spawnSync(process.execPath, [script], {
-      cwd: workspace,
-      encoding: "utf8",
-      timeout: 15_000,
-      env,
-    })
+    const result = spawnSync(
+      "bash",
+      ["--noprofile", "--norc", "-e", "-o", "pipefail", "-c", runCommand ?? "exit 1"],
+      {
+        cwd: workspace,
+        encoding: "utf8",
+        timeout: 15_000,
+        env,
+      },
+    )
     expect(result.error).toBeUndefined()
     expect(readdirSync(runner)).toEqual([])
     const calls: Command[] = existsSync(join(root, "commands.jsonl"))
@@ -242,6 +251,24 @@ function runAction(
 
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+})
+
+test("the triage manifest launches the source entry point from its action directory", () => {
+  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/../src/triage.mjs"')
+})
+
+test("runs the manifest from a source-only action directory with spaces", () => {
+  const root = mkdtempSync(join(tmpdir(), "pi-triage-source-"))
+  roots.push(root)
+  const directory = join(root, "action source")
+  for (const path of ["src", ".pi/prompts"]) {
+    cpSync(resolve(path), join(directory, path), { recursive: true })
+  }
+  const triagePath = join(directory, "triage")
+  mkdirSync(triagePath)
+  const { result, pi } = runAction({ GITHUB_ACTION_PATH: triagePath })
+  expect(result.status, result.stderr).toBe(0)
+  expect(pi.args[pi.args.indexOf("--system-prompt") + 1]).toBe(join(directory, defaultPrompt))
 })
 
 test("classifies the live issue with isolated API key auth and the bundled prompt", () => {

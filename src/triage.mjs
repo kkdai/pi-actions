@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process"
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
-import { escapeCommand, withPi } from "../scripts/pi.mjs"
+import { escapeCommand, withPi } from "./pi.mjs"
 
 function parseLabels(output, available) {
   let result
