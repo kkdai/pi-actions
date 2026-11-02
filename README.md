@@ -4,6 +4,9 @@ Use [pi-coding-agent](https://github.com/earendil-works/pi) to review a pull req
 diff, update a summary comment, and post inline review comments on code. The action
 does not approve or reject pull requests.
 
+For issue classification and labels, use the [triage action](triage/README.md) at
+`narumiruna/pi-action/triage@main`.
+
 ## Usage
 
 Create `.github/workflows/review.yml`:
