@@ -94,7 +94,15 @@ non-JSON output fail the action before any labels are applied.
 The [repository workflow](../.github/workflows/triage.yml) uses `PI_AUTH_JSON` with
 `openai-codex`. It runs after the workflow is merged into the default branch.
 
-After publishing the action revision, configure the Pi secret and run the workflow
-on a test issue with suitable repository labels. Check the selected labels, then
-rerun it and confirm that other labels remain unchanged. Local integration tests
-mock Pi and GitHub; they do not verify live model accuracy or GitHub permissions.
+A repository maintainer must configure the Pi credential secret after publishing
+the action revision. Run the workflow on a test issue with suitable repository
+labels. Check the selected labels, then rerun it and confirm that other labels
+remain unchanged. Complete this check before relying on automatic classification.
+Local integration tests mock Pi and GitHub; they do not verify live model accuracy,
+GitHub permissions, or label publication.
+
+## Rollback
+
+Remove the triage workflow step to stop classification. Existing labels remain
+unchanged unless a maintainer removes them. The action does not remove labels or
+post comments.

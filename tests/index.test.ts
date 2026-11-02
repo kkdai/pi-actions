@@ -1,15 +1,15 @@
-import { afterEach, expect, test, vi } from "vitest";
-import { printHelloWorld } from "../src/hello";
+import { afterEach, expect, test, vi } from "vitest"
+import { printHelloWorld } from "../src/hello"
 
 afterEach(() => {
-  vi.restoreAllMocks();
-});
+  vi.restoreAllMocks()
+})
 
 test('prints "Hello, world!"', () => {
-  const log = vi.spyOn(console, "log").mockImplementation(() => undefined);
+  const log = vi.spyOn(console, "log").mockImplementation(() => undefined)
 
-  printHelloWorld();
+  printHelloWorld()
 
-  expect(log).toHaveBeenCalledOnce();
-  expect(log).toHaveBeenCalledWith("Hello, world!");
-});
+  expect(log).toHaveBeenCalledOnce()
+  expect(log).toHaveBeenCalledWith("Hello, world!")
+})
