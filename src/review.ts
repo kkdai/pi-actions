@@ -22,34 +22,58 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value)
 }
 
-function reviewPullRequest() {
-  const env = process.env
-  if (env.GITHUB_EVENT_NAME !== "pull_request") {
-    throw new Error("This action requires a pull_request event.")
-  }
-
-  const eventPath = env.GITHUB_EVENT_PATH
-  if (!eventPath) throw new Error("GITHUB_EVENT_PATH is required.")
-  const event: unknown = JSON.parse(readFileSync(eventPath, "utf8"))
-  const number = isObject(event) ? event.number : undefined
-  const pullRequest =
-    isObject(event) && isObject(event.pull_request) ? event.pull_request : undefined
-  const base = pullRequest && isObject(pullRequest.base) ? pullRequest.base.sha : undefined
-  const head = pullRequest && isObject(pullRequest.head) ? pullRequest.head.sha : undefined
+function commitIds(pullRequest: unknown) {
+  const base =
+    isObject(pullRequest) && isObject(pullRequest.base) ? pullRequest.base.sha : undefined
+  const head =
+    isObject(pullRequest) && isObject(pullRequest.head) ? pullRequest.head.sha : undefined
   if (
-    typeof number !== "number" ||
-    !Number.isSafeInteger(number) ||
-    number < 1 ||
     typeof base !== "string" ||
     !/^[a-f0-9]{40,64}$/.test(base) ||
     typeof head !== "string" ||
     !/^[a-f0-9]{40,64}$/.test(head)
   ) {
-    throw new Error("The pull request event must contain a number and base/head commit IDs.")
+    throw new Error("The pull request must contain valid base/head commit IDs.")
   }
+  return { base, head }
+}
+
+function reviewPullRequest() {
+  const env = process.env
+  const eventName = env.GITHUB_EVENT_NAME
+  if (!["pull_request", "pull_request_target", "workflow_dispatch"].includes(eventName ?? "")) {
+    throw new Error(
+      "This action requires a pull_request, pull_request_target, or workflow_dispatch event.",
+    )
+  }
+
+  const manual = eventName === "workflow_dispatch"
+  let event: unknown
+  if (!manual) {
+    const eventPath = env.GITHUB_EVENT_PATH
+    if (!eventPath) throw new Error("GITHUB_EVENT_PATH is required.")
+    event = JSON.parse(readFileSync(eventPath, "utf8"))
+  }
+  const input = env.PI_PULL_REQUEST?.trim() ?? ""
+  const number = manual
+    ? /^[1-9]\d*$/.test(input)
+      ? Number(input)
+      : undefined
+    : isObject(event)
+      ? event.number
+      : undefined
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) {
+    throw new Error("A positive safe integer pull request number is required.")
+  }
+  const eventCommits = manual
+    ? undefined
+    : commitIds(isObject(event) ? event.pull_request : undefined)
 
   withPi(".pi/prompts/review-pull-request.md", ({ directory, options, run }) => {
     const repository = `repos/${env.GITHUB_REPOSITORY}`
+    const { base, head } =
+      eventCommits ??
+      commitIds(JSON.parse(execFileSync("gh", ["api", `${repository}/pulls/${number}`], options)))
     const diff = execFileSync(
       "gh",
       [

@@ -14,12 +14,15 @@ import { join, resolve } from "node:path"
 import { afterEach, expect, test } from "vitest"
 
 const actionPath = resolve("review")
-const runCommand = readFileSync(join(actionPath, "action.yml"), "utf8").match(
-  /^ {6}run: (node .+)$/m,
-)?.[1]
+const manifest = readFileSync(join(actionPath, "action.yml"), "utf8")
+const runCommand = manifest.match(/^ {6}run: (node .+)$/m)?.[1]
 const roots: string[] = []
 const base = "a".repeat(40)
 const head = "b".repeat(40)
+const pullRequest = {
+  base: { sha: base, repo: { full_name: "owner/repo" } },
+  head: { sha: head, repo: { full_name: "contributor/fork" } },
+}
 const diff =
   "diff --git a/example.ts b/example.ts\n--- a/example.ts\n+++ b/example.ts\n@@ -1 +1 @@\n-old\n+new\n"
 
@@ -61,8 +64,9 @@ if (command === "gh") {
     fail("list-inline");
     process.stdout.write(env.MOCK_INLINE_COMMENTS);
   } else if (method === "GET" && endpoint.endsWith("/pulls/42")) {
-    fail("head");
-    process.stdout.write(env.MOCK_CURRENT_HEAD);
+    const checkingHead = args.includes("--jq");
+    fail(checkingHead ? "head" : "metadata");
+    process.stdout.write(checkingHead ? env.MOCK_CURRENT_HEAD : env.MOCK_PULL_REQUEST);
   } else if (method === "POST" && endpoint.endsWith("/reviews")) {
     fail("review");
     writeFileSync(join(env.MOCK_ROOT, "posted.json"), readFileSync(args[args.indexOf("--input") + 1], "utf8"));
@@ -97,7 +101,11 @@ if (command === "gh") {
 }
 `
 
-function runAction(overrides: Record<string, string> = {}, promptPath?: string) {
+function runAction(
+  overrides: Record<string, string> = {},
+  promptPath?: string,
+  event: unknown = { number: 42, pull_request: pullRequest },
+) {
   const root = mkdtempSync(join(tmpdir(), "pi-review-test-"))
   roots.push(root)
   const workspace = join(root, "workspace")
@@ -108,10 +116,7 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
     writeFileSync(join(bin, command), mockCommand, { mode: 0o755 })
   }
   const eventPath = join(root, "event.json")
-  writeFileSync(
-    eventPath,
-    JSON.stringify({ number: 42, pull_request: { base: { sha: base }, head: { sha: head } } }),
-  )
+  writeFileSync(eventPath, JSON.stringify(event))
   if (promptPath) {
     const fullPath = join(workspace, promptPath)
     mkdirSync(resolve(fullPath, ".."), { recursive: true })
@@ -137,6 +142,7 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
         RUNNER_TEMP: runner,
         PI_PROVIDER: "openai",
         PI_MODEL: "gpt-6.1-sol",
+        PI_PULL_REQUEST: "",
         PI_API_KEY: "test-api-key",
         PI_AUTH_JSON: "",
         PI_BASE_URL: "",
@@ -148,6 +154,7 @@ function runAction(overrides: Record<string, string> = {}, promptPath?: string) 
         MOCK_SUMMARIES: "[[]]",
         MOCK_INLINE_COMMENTS: "[[]]",
         MOCK_CURRENT_HEAD: head,
+        MOCK_PULL_REQUEST: JSON.stringify(pullRequest),
         ...overrides,
       },
     },
@@ -175,6 +182,7 @@ function copyDistribution() {
 
 test("the review manifest launches the compiled entry point from its action directory", () => {
   expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/../dist/review.js"')
+  expect(manifest).toContain(`PI_PULL_REQUEST: \${{ inputs.pull-request }}`)
 })
 
 test("runs the manifest from a distribution-only action directory with spaces", () => {
@@ -200,60 +208,143 @@ test.each([
   expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
 })
 
-test("reviews the event's exact commits with the API key and bundled prompt", () => {
-  const { result, json, root } = runAction()
-  expect(result.status, result.stderr).toBe(0)
-  const commands = readFileSync(join(root, "commands.jsonl"), "utf8")
-    .trim()
-    .split("\n")
-    .map((line) => JSON.parse(line))
-  expect(commands[0]).toEqual({
-    command: "gh",
-    args: [
-      "api",
-      `repos/owner/repo/compare/${base}...${head}`,
-      "--header",
-      "Accept: application/vnd.github.diff",
-    ],
+test.each(["pull_request", "pull_request_target"])(
+  "reviews the exact %s commits with the API key and bundled prompt",
+  (eventName) => {
+    const { result, json, root } = runAction({
+      GITHUB_EVENT_NAME: eventName,
+      PI_PULL_REQUEST: "99",
+    })
+    expect(result.status, result.stderr).toBe(0)
+    const commands = readFileSync(join(root, "commands.jsonl"), "utf8")
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line))
+    expect(commands[0]).toEqual({
+      command: "gh",
+      args: [
+        "api",
+        `repos/owner/repo/compare/${base}...${head}`,
+        "--header",
+        "Accept: application/vnd.github.diff",
+      ],
+    })
+    const pi = json("pi.json")
+    expect(pi.auth).toEqual({ openai: { type: "api_key", key: "test-api-key" } })
+    expect(pi.mode).toBe(0o600)
+    expect(pi.cwd).toBe(pi.directory)
+    expect(pi.models).toBeNull()
+    expect(pi.diff).toBe(diff)
+    expect(pi.args).toEqual(
+      expect.arrayContaining([
+        "--print",
+        "--no-tools",
+        "--no-session",
+        "--no-extensions",
+        "--no-skills",
+        "--no-prompt-templates",
+        "--no-themes",
+        "--no-context-files",
+        "--no-approve",
+        "--provider",
+        "openai",
+        "--model",
+        "gpt-6.1-sol",
+        "--thinking",
+        "medium",
+        resolve(".pi/prompts/review-pull-request.md"),
+      ]),
+    )
+    for (const name of ["githubToken", "alternateToken", "apiKeyInput", "authJsonInput"]) {
+      expect(pi[name]).toBeUndefined()
+    }
+    const summary = json("summary.json")
+    expect(summary).toEqual({ body: expect.stringContaining(summaryMarker) })
+    expect(summary.body).toContain(noFindings.summary)
+    expect(summary.body).toContain(head)
+    expect(summary.body).toContain("This review covers only the supplied diff.")
+    expect(existsSync(join(root, "posted.json"))).toBe(false)
+    expect(result.stdout).toContain(
+      "Summary posted: https://github.com/owner/repo/pull/42#issuecomment-99",
+    )
+  },
+)
+
+test("reviews the current pull request commits for a manual dispatch", () => {
+  const { result, root, json } = runAction({
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    GITHUB_EVENT_PATH: "",
+    PI_PULL_REQUEST: " 42 ",
   })
-  const pi = json("pi.json")
-  expect(pi.auth).toEqual({ openai: { type: "api_key", key: "test-api-key" } })
-  expect(pi.mode).toBe(0o600)
-  expect(pi.cwd).toBe(pi.directory)
-  expect(pi.models).toBeNull()
-  expect(pi.diff).toBe(diff)
-  expect(pi.args).toEqual(
-    expect.arrayContaining([
-      "--print",
-      "--no-tools",
-      "--no-session",
-      "--no-extensions",
-      "--no-skills",
-      "--no-prompt-templates",
-      "--no-themes",
-      "--no-context-files",
-      "--no-approve",
-      "--provider",
-      "openai",
-      "--model",
-      "gpt-6.1-sol",
-      "--thinking",
-      "medium",
-      resolve(".pi/prompts/review-pull-request.md"),
-    ]),
-  )
-  for (const name of ["githubToken", "alternateToken", "apiKeyInput", "authJsonInput"]) {
-    expect(pi[name]).toBeUndefined()
-  }
-  const summary = json("summary.json")
-  expect(summary).toEqual({ body: expect.stringContaining(summaryMarker) })
-  expect(summary.body).toContain(noFindings.summary)
-  expect(summary.body).toContain(head)
-  expect(summary.body).toContain("This review covers only the supplied diff.")
+  expect(result.status, result.stderr).toBe(0)
+  expect(commands(root).slice(0, 2)).toEqual([
+    { command: "gh", args: ["api", "repos/owner/repo/pulls/42"] },
+    {
+      command: "gh",
+      args: [
+        "api",
+        `repos/owner/repo/compare/${base}...${head}`,
+        "--header",
+        "Accept: application/vnd.github.diff",
+      ],
+    },
+  ])
+  expect(json("summary.json").body).toContain(head)
+  expect(json("pi.json").args).toContain("--no-tools")
+  expect(json("pi.json").githubToken).toBeUndefined()
+})
+
+test.each(["", "0", "-1", "1.5", "1e2", "42/../43", "9007199254740992"])(
+  "rejects an invalid manual pull request number %j before invoking commands",
+  (input) => {
+    const { result, root } = runAction({
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      PI_PULL_REQUEST: input,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("positive safe integer pull request number")
+    expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
+  },
+)
+
+test.each([
+  null,
+  {},
+  { number: 0, pull_request: pullRequest },
+  { number: "42", pull_request: pullRequest },
+  { number: 42, pull_request: { base: { sha: "invalid" }, head: { sha: head } } },
+])("rejects malformed pull request target metadata %j", (event) => {
+  const { result, root } = runAction({ GITHUB_EVENT_NAME: "pull_request_target" }, undefined, event)
+  expect(result.status).toBe(1)
+  expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
+})
+
+test.each([null, {}, { base: { sha: base }, head: { sha: "invalid" } }])(
+  "rejects invalid manual pull request metadata %j before running Pi",
+  (metadata) => {
+    const { result, root } = runAction({
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      PI_PULL_REQUEST: "42",
+      MOCK_PULL_REQUEST: JSON.stringify(metadata),
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("valid base/head commit IDs")
+    expect(commands(root)).toEqual([{ command: "gh", args: ["api", "repos/owner/repo/pulls/42"] }])
+    expect(existsSync(join(root, "summary.json"))).toBe(false)
+  },
+)
+
+test("cleans credentials without publishing when manual metadata retrieval fails", () => {
+  const { result, root } = runAction({
+    GITHUB_EVENT_NAME: "workflow_dispatch",
+    PI_PULL_REQUEST: "42",
+    MOCK_FAILURE: "metadata",
+  })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("mock metadata failure")
+  expect(commands(root)).toHaveLength(1)
+  expect(existsSync(join(root, "summary.json"))).toBe(false)
   expect(existsSync(join(root, "posted.json"))).toBe(false)
-  expect(result.stdout).toContain(
-    "Summary posted: https://github.com/owner/repo/pull/42#issuecomment-99",
-  )
 })
 
 test("loads only the selected OAuth credential from auth-json", () => {
@@ -338,7 +429,10 @@ test.each([
   [{ PI_THINKING: "invalid" }, "Invalid thinking"],
   [{ PI_BASE_URL: "file:///tmp/model" }, "HTTP or HTTPS"],
   [{ PI_PROMPT: "missing.md" }, "prompt file does not exist"],
-  [{ GITHUB_EVENT_NAME: "pull_request_target" }, "pull_request event"],
+  [
+    { GITHUB_EVENT_NAME: "push" },
+    "requires a pull_request, pull_request_target, or workflow_dispatch event",
+  ],
   [{ GITHUB_EVENT_PATH: "" }, "GITHUB_EVENT_PATH is required"],
   [{ GITHUB_WORKSPACE: "" }, "GITHUB_WORKSPACE and RUNNER_TEMP are required"],
   [{ RUNNER_TEMP: "" }, "GITHUB_WORKSPACE and RUNNER_TEMP are required"],
@@ -550,13 +644,21 @@ test("does not submit duplicate inline findings in the same batch", () => {
   expect(json("posted.json").comments).toHaveLength(1)
 })
 
-test("does not publish a stale summary or inline review if the pull request head changes", () => {
-  const { result, root } = runAction({ MOCK_REVIEW: withFinding, MOCK_CURRENT_HEAD: base })
-  expect(result.status).toBe(1)
-  expect(result.stderr).toContain("head changed")
-  expect(existsSync(join(root, "summary.json"))).toBe(false)
-  expect(existsSync(join(root, "posted.json"))).toBe(false)
-})
+test.each(["pull_request", "pull_request_target", "workflow_dispatch"])(
+  "does not publish a stale summary or inline review for %s if the head changes",
+  (eventName) => {
+    const { result, root } = runAction({
+      GITHUB_EVENT_NAME: eventName,
+      PI_PULL_REQUEST: "42",
+      MOCK_REVIEW: withFinding,
+      MOCK_CURRENT_HEAD: base,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("head changed")
+    expect(existsSync(join(root, "summary.json"))).toBe(false)
+    expect(existsSync(join(root, "posted.json"))).toBe(false)
+  },
+)
 
 test("rejects invalid model output before making comment API requests", () => {
   const { result, root } = runAction({ MOCK_REVIEW: "Not JSON." })
