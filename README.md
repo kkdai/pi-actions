@@ -15,16 +15,22 @@ Create `.github/workflows/review.yml`:
 name: PR Review
 
 on:
-  pull_request:
+  pull_request_target:
     branches:
       - main
+  workflow_dispatch:
+    inputs:
+      pull-request:
+        description: Pull request number to review
+        required: true
+        type: number
 
 permissions:
   contents: read
   pull-requests: write
 
 concurrency:
-  group: pi-review-${{ github.event.pull_request.number }}
+  group: pi-review-${{ github.event.pull_request.number || inputs.pull-request }}
   cancel-in-progress: true
 
 jobs:
@@ -34,6 +40,7 @@ jobs:
     steps:
       - uses: narumiruna/pi-action/review@main
         with:
+          pull-request: ${{ inputs.pull-request }}
           api-key: ${{ secrets.PI_API_KEY }}
           provider: openai
           model: gpt-6.1-sol
@@ -44,17 +51,29 @@ Pin the action to a commit SHA for production use. No checkout is needed with th
 bundled prompt. The runner must provide Bash and GitHub CLI; `ubuntu-latest`
 includes both. The action installs Node.js and Pi.
 
+`pull_request_target` runs with the base repository's credentials and can review fork
+pull requests. Do not check out a pull request head, load its prompts, or execute
+its code in this workflow. Use only trusted action code and prompts.
+
+To review an existing pull request, dispatch the workflow from the trusted `main`
+branch:
+
+```sh
+gh workflow run review.yml --ref main -f pull-request=123
+```
+
 ## Inputs
 
-| Input       | Required             | Description                                                                                                            |
-| ----------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `auth-json` | One credential input | Contents of Pi's `auth.json`, including API keys or OAuth credentials.                                                 |
-| `api-key`   | One credential input | API key for `provider`.                                                                                                |
-| `base-url`  | No                   | API base URL override for an existing Pi provider. Its API protocol and model catalog stay unchanged.                  |
-| `provider`  | No                   | Pi provider ID. Default: `openai`.                                                                                     |
-| `model`     | No                   | Model ID in the selected provider's Pi catalog. Default: `gpt-6.1-sol`.                                                |
-| `thinking`  | No                   | `off`, `minimal`, `low`, `medium` (default), `high`, `xhigh`, or `max`. Pi limits it to levels supported by the model. |
-| `prompt`    | No                   | Markdown prompt file. Default: `.pi/prompts/review-pull-request.md`.                                                   |
+| Input          | Required             | Description                                                                                                            |
+| -------------- | -------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `pull-request` | For manual review    | Positive integer pull request number for `workflow_dispatch`. Ignored for pull request events.                         |
+| `auth-json`    | One credential input | Contents of Pi's `auth.json`, including API keys or OAuth credentials.                                                 |
+| `api-key`      | One credential input | API key for `provider`.                                                                                                |
+| `base-url`     | No                   | API base URL override for an existing Pi provider. Its API protocol and model catalog stay unchanged.                  |
+| `provider`     | No                   | Pi provider ID. Default: `openai`.                                                                                     |
+| `model`        | No                   | Model ID in the selected provider's Pi catalog. Default: `gpt-6.1-sol`.                                                |
+| `thinking`     | No                   | `off`, `minimal`, `low`, `medium` (default), `high`, `xhigh`, or `max`. Pi limits it to levels supported by the model. |
+| `prompt`       | No                   | Markdown prompt file. Default: `.pi/prompts/review-pull-request.md`.                                                   |
 
 Provide exactly one of `api-key` or `auth-json`. Store credentials in GitHub Actions
 secrets. The workflow's `GITHUB_TOKEN` needs `contents: read` and
@@ -68,6 +87,7 @@ Run `/login` in Pi, then save the contents of `~/.pi/agent/auth.json` as the
 ```yaml
 - uses: narumiruna/pi-action/review@main
   with:
+    pull-request: ${{ inputs.pull-request }}
     auth-json: ${{ secrets.PI_AUTH_JSON }}
     provider: openai
     model: gpt-6.1-sol
@@ -106,17 +126,20 @@ without an exact diff location. Plain Markdown output is not supported.
 - Findings with valid diff locations become inline review threads. Single lines,
   multiline ranges, and removed lines are supported. Findings without valid
   locations remain in the summary with their full explanation.
-- Inline findings are submitted together as a `COMMENT` review at the event's
+- Inline findings are submitted together as a `COMMENT` review at the reviewed
   head commit. Identical findings at that commit are not posted twice. Findings
   at a new commit can create new threads; old threads are not deleted or resolved.
 - A run with no findings only updates the summary. It does not post an empty review.
 
 ## Review limits
 
-- Only `pull_request` events are supported. Fork workflows normally have no secrets
-  and a read-only token, so the example cannot review fork pull requests.
-- Reviews use the diff between the event's base and head commits. If the PR head
-  changes before publication, the run fails without publishing its result.
+- Supported events are `pull_request`, `pull_request_target`, and `workflow_dispatch`.
+  Use `pull_request_target` for fork reviews. Fork `pull_request` runs normally have
+  no secrets and a read-only token.
+- Pull request events use their base and head commits. Manual reviews fetch the
+  current commit IDs from GitHub before reading the diff. Before publication, the
+  action checks the current head. A detected mismatch fails the run without
+  publishing its result. This check is not atomic with the comment writes.
 - Pi runs without tools, extensions, skills, project configuration, or session
   storage. It does not run pull request code or inspect files outside the diff.
 - GitHub diff limits and model context limits apply. The review covers only the

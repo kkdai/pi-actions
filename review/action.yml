@@ -2,6 +2,9 @@ name: Pi Pull Request Review
 description: Review a pull request with pi-coding-agent, update its summary, and comment inline.
 
 inputs:
+  pull-request:
+    description: Pull request number for workflow_dispatch. Ignored for pull request events.
+    required: false
   auth-json:
     description: Contents of Pi's auth.json. Provide this or api-key, not both.
     required: false
@@ -44,6 +47,7 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ github.token }}
+        PI_PULL_REQUEST: ${{ inputs.pull-request }}
         PI_AUTH_JSON: ${{ inputs.auth-json }}
         PI_API_KEY: ${{ inputs.api-key }}
         PI_BASE_URL: ${{ inputs.base-url }}
