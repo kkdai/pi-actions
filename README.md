@@ -123,6 +123,9 @@ without an exact diff location. Plain Markdown output is not supported.
   and historical reviews are not changed.
 - The summary keeps its original position. GitHub does not let the action insert
   a new comment before existing comments or move it to the top of the conversation.
+- The summary starts with the review result. Finding sections show their counts,
+  and each inline finding links to its location in the reviewed diff. A footer
+  links to the reviewed commit with a short commit ID.
 - Findings with valid diff locations become inline review threads. Single lines,
   multiline ranges, and removed lines are supported. Findings without valid
   locations remain in the summary with their full explanation.

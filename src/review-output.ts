@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto"
+
 export const summaryMarker = "<!-- pi-action:summary -->"
 
 const severities = ["critical", "high", "medium", "low"] as const
@@ -273,7 +275,19 @@ function locationText(location: FindingLocation | null) {
   if (location === null) return "General finding"
   const start = location.start_line
   const range = start !== undefined && start !== location.line ? `${start}-` : ""
-  return `\`${location.path}:${range}${location.line} (${location.side})\``
+  const text = `${location.path}:${range}${location.line}`
+  const ticks = text.match(/`+/g) ?? []
+  const delimiter = "`".repeat(Math.max(0, ...ticks.map((tick) => tick.length)) + 1)
+  const code = delimiter.length > 1 ? `${delimiter} ${text} ${delimiter}` : `\`${text}\``
+  return `${code}${location.side === "LEFT" ? " (removed)" : ""}`
+}
+
+function locationLink(location: ReviewAnchor, pullRequestUrl: string, head: string) {
+  const hash = createHash("sha256").update(location.path).digest("hex")
+  const side = location.side === "LEFT" ? "L" : "R"
+  const range = location.start_line ? `${side}${location.start_line}-` : ""
+  const url = `${pullRequestUrl}/files/${head}#diff-${hash}${range}${side}${location.line}`
+  return `[${locationText(location)}](${url})`
 }
 
 function checkBody(body: string) {
@@ -283,7 +297,7 @@ function checkBody(body: string) {
   return body
 }
 
-export function buildReview(raw: unknown, diff: unknown, head: unknown) {
+export function buildReview(raw: unknown, diff: unknown, head: unknown, pullRequestUrl: string) {
   const output = validateOutput(raw)
   if (typeof diff !== "string" || !isText(head)) {
     throw new Error("The diff must be a string and the reviewed head must be non-empty text.")
@@ -299,18 +313,21 @@ export function buildReview(raw: unknown, diff: unknown, head: unknown) {
         ...anchor,
         body: checkBody(`<!-- pi-action:finding -->\n**${label(finding)}**\n\n${finding.body}`),
       })
-      anchored.push(`- **${label(finding)}** — ${locationText(anchor)}`)
+      anchored.push(`- **${label(finding)}**  \n  ${locationLink(anchor, pullRequestUrl, head)}`)
     } else {
-      general.push(`### ${label(finding)}\n\n${locationText(finding.location)}\n\n${finding.body}`)
+      general.push(`#### ${label(finding)}\n\n${locationText(finding.location)}\n\n${finding.body}`)
     }
   }
-  const sections = [
-    `${summaryMarker}\n## Pi review`,
-    `Reviewed head commit: \`${head}\``,
-    output.summary,
-    "This review covers only the supplied diff.",
-  ]
-  if (anchored.length) sections.push(`### Inline findings\n\n${anchored.join("\n")}`)
-  if (general.length) sections.push(`## Summary-only findings\n\n${general.join("\n\n")}`)
+  const sections = [`${summaryMarker}\n## Pi review`, output.summary]
+  if (anchored.length) {
+    sections.push(`### Inline findings (${anchored.length})\n\n${anchored.join("\n\n")}`)
+  }
+  if (general.length) {
+    sections.push(`### Summary-only findings (${general.length})\n\n${general.join("\n\n")}`)
+  }
+  sections.push(
+    "---",
+    `<sub>Reviewed commit: [\`${head.slice(0, 7)}\`](${pullRequestUrl}/commits/${head}) · This review covers only the supplied diff.</sub>`,
+  )
   return { body: checkBody(sections.join("\n\n")), comments }
 }
