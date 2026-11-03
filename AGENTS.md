@@ -10,3 +10,4 @@
 ## Changesets
 
 - Add a changeset in `.changeset/` for each pull request that changes published behavior.
+- Do not add empty changesets.
