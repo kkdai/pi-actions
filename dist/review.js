@@ -62,7 +62,8 @@ function reviewPullRequest() {
         const review = run(diffPath, "Review the attached pull request diff.");
         if (!review)
             throw new Error("Pi returned an empty review.");
-        const report = buildReview(review, diff, head);
+        const pullRequestUrl = `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/pull/${number}`;
+        const report = buildReview(review, diff, head, pullRequestUrl);
         const api = (args) => execFileSync("gh", ["api", ...args], options).trim();
         const list = (endpoint) => JSON.parse(api([endpoint, "--paginate", "--slurp"])).flat();
         const request = (method, endpoint, payload) => {
@@ -100,7 +101,7 @@ function reviewPullRequest() {
         console.log(`Summary ${previous ? "updated" : "posted"}: ${summary.html_url}`);
         if (comments.length) {
             const posted = request("POST", `${repository}/pulls/${number}/reviews`, {
-                body: `Inline findings for \`${head}\`. See the [Pi review summary](${summary.html_url}).`,
+                body: `Inline findings for [\`${head.slice(0, 7)}\`](${pullRequestUrl}/commits/${head}). See the [Pi review summary](${summary.html_url}).`,
                 event: "COMMENT",
                 commit_id: head,
                 comments,

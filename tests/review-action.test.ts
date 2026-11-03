@@ -138,6 +138,7 @@ function runAction(
         GITHUB_EVENT_NAME: "pull_request",
         GITHUB_EVENT_PATH: eventPath,
         GITHUB_REPOSITORY: "owner/repo",
+        GITHUB_SERVER_URL: "https://github.com",
         GITHUB_WORKSPACE: workspace,
         RUNNER_TEMP: runner,
         PI_PROVIDER: "openai",
@@ -478,7 +479,7 @@ test("creates the summary before submitting inline comments at the exact head", 
   expect(result.status, result.stderr).toBe(0)
   const posted = json("posted.json")
   expect(posted).toEqual({
-    body: expect.stringContaining("#issuecomment-99"),
+    body: `Inline findings for [\`bbbbbbb\`](https://github.com/owner/repo/pull/42/commits/${head}). See the [Pi review summary](https://github.com/owner/repo/pull/42#issuecomment-99).`,
     event: "COMMENT",
     commit_id: head,
     comments: [{ path: "example.ts", line: 1, side: "RIGHT", body: inlineBody }],
@@ -496,6 +497,25 @@ test("creates the summary before submitting inline comments at the exact head", 
     })
   }
 })
+
+test.each(["https://github.com", "https://github.example.com"])(
+  "uses %s and the base repository for review links",
+  (serverUrl) => {
+    const { result, json } = runAction({
+      GITHUB_SERVER_URL: serverUrl,
+      MOCK_REVIEW: withFinding,
+    })
+    expect(result.status, result.stderr).toBe(0)
+    const pullRequestUrl = `${serverUrl}/owner/repo/pull/42`
+    const summary = json("summary.json").body
+    expect(summary).toContain(`[\`bbbbbbb\`](${pullRequestUrl}/commits/${head})`)
+    expect(summary).toContain(
+      `[\`example.ts:1\`](${pullRequestUrl}/files/${head}#diff-c2367a00abc15282c1e43ae86544aef6825813116411291ec398336737cee78cR1)`,
+    )
+    expect(summary).not.toContain("contributor/fork")
+    expect(json("posted.json").body).toContain(`[\`bbbbbbb\`](${pullRequestUrl}/commits/${head})`)
+  },
+)
 
 test("updates the first Pi summary across paginated comments and preserves other authors", () => {
   const pages = [
