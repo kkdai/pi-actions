@@ -510,7 +510,7 @@ test.each(["https://github.com", "https://github.example.com"])(
     const summary = json("summary.json").body
     expect(summary).toContain(`[\`bbbbbbb\`](${pullRequestUrl}/commits/${head})`)
     expect(summary).toContain(
-      `[\`example.ts:1\`](${pullRequestUrl}/files/${head}#diff-c2367a00abc15282c1e43ae86544aef6825813116411291ec398336737cee78cR1)`,
+      `[\`example.ts:1\`](${pullRequestUrl}/files/${head}#diff-c2367a00abc15282c1e43ae86544aef6825813116411291ec398336737cee78cR1 "example.ts")`,
     )
     expect(summary).not.toContain("contributor/fork")
     expect(json("posted.json").body).toContain(`[\`bbbbbbb\`](${pullRequestUrl}/commits/${head})`)
