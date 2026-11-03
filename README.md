@@ -133,7 +133,8 @@ without an exact diff location. Plain Markdown output is not supported.
 - Inline findings are submitted together as a `COMMENT` review at the reviewed
   head commit. Identical findings at that commit are not posted twice. Findings
   at a new commit can create new threads; old threads are not deleted or resolved.
-- A run with no findings only updates the summary. It does not post an empty review.
+- A run with no findings shows only the summary and commit footer, without an
+  empty findings table. It does not post an empty review.
 
 ## Review limits
 

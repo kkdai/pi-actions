@@ -26,7 +26,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/review@v0.0.2
+      # Includes the comment layouts merged in PRs #19 and #22.
+      - uses: narumiruna/pi-action/review@d65686d3968ed2bbf0eb72b4330d9d5c2faacd73
         with:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
