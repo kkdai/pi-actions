@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { escapeCommand, withPi } from "./pi.js";
 import { buildReview, summaryMarker } from "./review-output.js";
+import { listFindingThreads, resolveFindingThread } from "./review-threads.js";
 function isObject(value) {
     return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -47,6 +48,7 @@ function reviewPullRequest() {
         : commitIds(isObject(event) ? event.pull_request : undefined);
     withPi(".pi/prompts/review-pull-request.md", ({ directory, options, run }) => {
         const repository = `repos/${env.GITHUB_REPOSITORY}`;
+        const api = (args) => execFileSync("gh", ["api", ...args], options).trim();
         const { base, head } = eventCommits ??
             commitIds(JSON.parse(execFileSync("gh", ["api", `${repository}/pulls/${number}`], options)));
         const diff = execFileSync("gh", [
@@ -57,14 +59,14 @@ function reviewPullRequest() {
         ], options);
         if (!diff.trim())
             throw new Error("The pull request diff is empty.");
-        const diffPath = join(directory, "diff.patch");
-        writeFileSync(diffPath, diff);
-        const review = run(diffPath, "Review the attached pull request diff.");
+        const threads = listFindingThreads(api, env.GITHUB_REPOSITORY ?? "", number, head);
+        const inputPath = join(directory, threads.length ? "review-input.json" : "diff.patch");
+        writeFileSync(inputPath, threads.length ? JSON.stringify({ diff, unresolved_threads: threads }) : diff);
+        const review = run(inputPath, "Review the attached current pull request diff and recheck any supplied unresolved findings.");
         if (!review)
             throw new Error("Pi returned an empty review.");
         const pullRequestUrl = `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/pull/${number}`;
-        const report = buildReview(review, diff, head, pullRequestUrl);
-        const api = (args) => execFileSync("gh", ["api", ...args], options).trim();
+        const report = buildReview(review, diff, head, pullRequestUrl, threads.map((thread) => thread.id));
         const list = (endpoint) => JSON.parse(api([endpoint, "--paginate", "--slurp"])).flat();
         const request = (method, endpoint, payload) => {
             const requestPath = join(directory, "request.json");
@@ -82,7 +84,10 @@ function reviewPullRequest() {
         ]);
         const summaries = list(`${repository}/issues/${number}/comments`);
         const previous = summaries.find((comment) => isPiBot(comment) && comment.body?.startsWith(summaryMarker));
-        const published = new Set((report.comments.length ? list(`${repository}/pulls/${number}/comments`) : [])
+        const inlineComments = report.comments.length || report.resolvedThreads.length
+            ? list(`${repository}/pulls/${number}/comments`)
+            : [];
+        const published = new Set(inlineComments
             .filter((comment) => isPiBot(comment) && comment.original_commit_id === head)
             .map(commentKey));
         const comments = report.comments.filter((comment) => {
@@ -92,9 +97,12 @@ function reviewPullRequest() {
             published.add(key);
             return true;
         });
-        if (api([`${repository}/pulls/${number}`, "--jq", ".head.sha"]) !== head) {
-            throw new Error("The pull request head changed during review. Rerun on the latest commit.");
-        }
+        const assertHead = () => {
+            if (api([`${repository}/pulls/${number}`, "--jq", ".head.sha"]) !== head) {
+                throw new Error("The pull request head changed during review. Rerun on the latest commit.");
+            }
+        };
+        assertHead();
         const summary = request(previous ? "PATCH" : "POST", previous
             ? `${repository}/issues/comments/${previous.id}`
             : `${repository}/issues/${number}/comments`, { body: report.body });
@@ -107,6 +115,24 @@ function reviewPullRequest() {
                 comments,
             });
             console.log(`Review posted: ${posted.html_url}`);
+        }
+        for (const thread of threads) {
+            const resolution = report.resolvedThreads.find((item) => item.id === thread.id);
+            if (!resolution)
+                continue;
+            assertHead();
+            const marker = `<!-- pi-action:resolution:${head} -->`;
+            const explained = inlineComments.some((comment) => isPiBot(comment) &&
+                comment.in_reply_to_id === thread.comment_id &&
+                comment.body?.startsWith(`${marker}\n`));
+            if (!explained) {
+                request("POST", `${repository}/pulls/${number}/comments/${thread.comment_id}/replies`, {
+                    body: `${marker}\nFixed in [\`${head.slice(0, 7)}\`](${pullRequestUrl}/commits/${head}): ${resolution.reason}`,
+                });
+            }
+            assertHead();
+            resolveFindingThread(api, thread.id);
+            console.log(`Thread resolved: ${pullRequestUrl}#discussion_r${thread.comment_id}`);
         }
     });
 }
