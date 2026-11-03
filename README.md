@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action@main
+      - uses: narumiruna/pi-action/review@main
         with:
           api-key: ${{ secrets.PI_API_KEY }}
           provider: openai
@@ -66,7 +66,7 @@ Run `/login` in Pi, then save the contents of `~/.pi/agent/auth.json` as the
 `PI_AUTH_JSON` repository secret. Replace the action step with:
 
 ```yaml
-- uses: narumiruna/pi-action@main
+- uses: narumiruna/pi-action/review@main
   with:
     auth-json: ${{ secrets.PI_AUTH_JSON }}
     provider: openai
@@ -127,6 +127,7 @@ without an exact diff location. Plain Markdown output is not supported.
 
 ## Development
 
+Action manifests are in `review/action.yml` and `triage/action.yml`.
 Action runtime sources are in `src/`: `review.ts`, `review-output.ts`,
 `triage.ts`, and the shared `pi.ts`. TypeScript compiles them to ESM JavaScript
 in `dist/`. Both composite actions run the committed `dist/` files, so action
@@ -147,9 +148,9 @@ source change; do not edit generated JavaScript directly. CI rebuilds the action
 and rejects changed or untracked files in `dist/`.
 
 Distribution tests run each manifest command from a copied action directory
-that contains only `dist/`, `package.json`, and bundled prompts. They also check
-missing runtime modules and prompts. No caller checkout or local build tools
-are required to use the committed action revision.
+that contains only `dist/`, `package.json`, bundled prompts, and the action
+subdirectory. They also check missing runtime modules and prompts. No caller
+checkout or local build tools are required to use the committed action revision.
 
 ### Verify GitHub comments
 

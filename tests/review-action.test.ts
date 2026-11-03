@@ -13,7 +13,7 @@ import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import { afterEach, expect, test } from "vitest"
 
-const actionPath = resolve(".")
+const actionPath = resolve("review")
 const runCommand = readFileSync(join(actionPath, "action.yml"), "utf8").match(
   /^ {6}run: (node .+)$/m,
 )?.[1]
@@ -169,17 +169,18 @@ function copyDistribution() {
   for (const path of ["dist", ".pi/prompts", "package.json"]) {
     cpSync(resolve(path), join(directory, path), { recursive: true })
   }
+  mkdirSync(join(directory, "review"))
   return directory
 }
 
 test("the review manifest launches the compiled entry point from its action directory", () => {
-  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/dist/review.js"')
+  expect(runCommand).toBe('node "$GITHUB_ACTION_PATH/../dist/review.js"')
 })
 
 test("runs the manifest from a distribution-only action directory with spaces", () => {
   const directory = copyDistribution()
-  expect(readdirSync(directory).sort()).toEqual([".pi", "dist", "package.json"])
-  const { result, json } = runAction({ GITHUB_ACTION_PATH: directory })
+  expect(readdirSync(directory).sort()).toEqual([".pi", "dist", "package.json", "review"])
+  const { result, json } = runAction({ GITHUB_ACTION_PATH: join(directory, "review") })
   expect(result.status, result.stderr).toBe(0)
   const args = json("pi.json").args
   expect(args[args.indexOf("--system-prompt") + 1]).toBe(
@@ -193,7 +194,7 @@ test.each([
 ])("fails safely when the distribution is missing %s", (path, message) => {
   const directory = copyDistribution()
   rmSync(join(directory, path))
-  const { result, root } = runAction({ GITHUB_ACTION_PATH: directory })
+  const { result, root } = runAction({ GITHUB_ACTION_PATH: join(directory, "review") })
   expect(result.status).toBe(1)
   expect(result.stderr).toContain(message)
   expect(existsSync(join(root, "commands.jsonl"))).toBe(false)

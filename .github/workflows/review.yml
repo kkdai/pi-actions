@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action@main
+      - uses: narumiruna/pi-action/review@main
         with:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           provider: openai-codex
