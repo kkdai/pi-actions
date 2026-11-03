@@ -37,6 +37,30 @@ const finding = {
 const inlineBody = `<!-- pi-action:finding -->\n**High: ${finding.title}**\n\n${finding.body}`
 const bot = { login: "github-actions[bot]", type: "Bot" }
 const withFinding = JSON.stringify({ summary: "One issue found.", findings: [finding] })
+const previousThread = {
+  id: "PRRT_1",
+  isResolved: false,
+  path: "example.ts",
+  line: null,
+  originalLine: 1,
+  diffSide: "RIGHT",
+  comments: {
+    nodes: [
+      {
+        fullDatabaseId: "41",
+        body: inlineBody,
+        diffHunk: diff,
+        originalCommit: { oid: base },
+        author: { __typename: "Bot", login: "github-actions" },
+      },
+    ],
+  },
+}
+const reason = "The new guard rejects missing values before they are used."
+const fixedReview = JSON.stringify({
+  ...noFindings,
+  resolved_threads: [{ id: previousThread.id, reason }],
+})
 
 const mockCommand = String.raw`#!/usr/bin/env node
 const { appendFileSync, existsSync, readFileSync, statSync, writeFileSync } = require("node:fs");
@@ -54,7 +78,25 @@ function fail(stage) {
 if (command === "gh") {
   const endpoint = args.find(value => value.startsWith("repos/"));
   const method = args.includes("--method") ? args[args.indexOf("--method") + 1] : "GET";
-  if (endpoint.includes("/compare/")) {
+  if (args[1] === "graphql") {
+    const query = args.find(value => value.startsWith("query="));
+    if (query.includes("resolveReviewThread")) {
+      fail("resolve");
+      if (env.MOCK_GRAPHQL_ERRORS) {
+        console.log(JSON.stringify({ errors: [{ message: "Resolution denied." }] }));
+      } else {
+        const id = args.find(value => value.startsWith("id=")).slice(3);
+        appendFileSync(join(env.MOCK_ROOT, "resolved.jsonl"), JSON.stringify({ id }) + "\n");
+        console.log(JSON.stringify({ data: { resolveReviewThread: { thread: { id, isResolved: true } } } }));
+      }
+    } else {
+      fail("list-threads");
+      console.log(JSON.stringify({ data: { repository: { pullRequest: { reviewThreads: {
+        nodes: JSON.parse(env.MOCK_THREADS),
+        pageInfo: { hasNextPage: false, endCursor: null },
+      } } } } }));
+    }
+  } else if (endpoint.includes("/compare/")) {
     fail("fetch");
     process.stdout.write(env.MOCK_EMPTY_DIFF ? "" : env.MOCK_DIFF);
   } else if (method === "GET" && endpoint.endsWith("/issues/42/comments")) {
@@ -66,7 +108,20 @@ if (command === "gh") {
   } else if (method === "GET" && endpoint.endsWith("/pulls/42")) {
     const checkingHead = args.includes("--jq");
     fail(checkingHead ? "head" : "metadata");
-    process.stdout.write(checkingHead ? env.MOCK_CURRENT_HEAD : env.MOCK_PULL_REQUEST);
+    if (checkingHead && env.MOCK_HEADS) {
+      const heads = JSON.parse(env.MOCK_HEADS);
+      const counter = join(env.MOCK_ROOT, "head-checks");
+      const index = existsSync(counter) ? Number(readFileSync(counter, "utf8")) : 0;
+      writeFileSync(counter, String(index + 1));
+      process.stdout.write(heads[Math.min(index, heads.length - 1)]);
+    } else {
+      process.stdout.write(checkingHead ? env.MOCK_CURRENT_HEAD : env.MOCK_PULL_REQUEST);
+    }
+  } else if (method === "POST" && endpoint.endsWith("/replies")) {
+    fail("reply");
+    const payload = JSON.parse(readFileSync(args[args.indexOf("--input") + 1], "utf8"));
+    appendFileSync(join(env.MOCK_ROOT, "replies.jsonl"), JSON.stringify({ endpoint, ...payload }) + "\n");
+    console.log(JSON.stringify({ html_url: "https://github.com/owner/repo/pull/42#discussion_r43" }));
   } else if (method === "POST" && endpoint.endsWith("/reviews")) {
     fail("review");
     writeFileSync(join(env.MOCK_ROOT, "posted.json"), readFileSync(args[args.indexOf("--input") + 1], "utf8"));
@@ -154,6 +209,7 @@ function runAction(
         MOCK_REVIEW: JSON.stringify(noFindings),
         MOCK_SUMMARIES: "[[]]",
         MOCK_INLINE_COMMENTS: "[[]]",
+        MOCK_THREADS: "[]",
         MOCK_CURRENT_HEAD: head,
         MOCK_PULL_REQUEST: JSON.stringify(pullRequest),
         ...overrides,
@@ -199,6 +255,7 @@ test("runs the manifest from a distribution-only action directory with spaces", 
 
 test.each([
   ["dist/pi.js", "ERR_MODULE_NOT_FOUND"],
+  ["dist/review-threads.js", "ERR_MODULE_NOT_FOUND"],
   [".pi/prompts/review-pull-request.md", "The prompt file does not exist."],
 ])("fails safely when the distribution is missing %s", (path, message) => {
   const directory = copyDistribution()
@@ -445,7 +502,7 @@ test.each([
   expect(existsSync(join(root, "commands.jsonl"))).toBe(false)
 })
 
-test.each(["fetch", "pi", "list-summaries", "head", "summary"])(
+test.each(["fetch", "list-threads", "pi", "list-summaries", "head", "summary"])(
   "cleans credentials after a %s failure",
   (stage) => {
     const { result, root } = runAction({ MOCK_FAILURE: stage })
@@ -683,7 +740,9 @@ test.each(["pull_request", "pull_request_target", "workflow_dispatch"])(
 test("rejects invalid model output before making comment API requests", () => {
   const { result, root } = runAction({ MOCK_REVIEW: "Not JSON." })
   expect(result.status).toBe(1)
-  expect(commands(root).filter((call) => call.command === "gh")).toHaveLength(1)
+  const calls = commands(root).filter((call) => call.command === "gh")
+  expect(calls).toHaveLength(2)
+  expect(calls.every((call) => !call.args.includes("--method"))).toBe(true)
   expect(existsSync(join(root, "summary.json"))).toBe(false)
   expect(existsSync(join(root, "posted.json"))).toBe(false)
 })
@@ -694,6 +753,208 @@ test("cleans credentials without writes when listing inline comments fails", () 
   expect(result.stderr).toContain("mock list-inline failure")
   expect(existsSync(join(root, "summary.json"))).toBe(false)
   expect(existsSync(join(root, "posted.json"))).toBe(false)
+})
+
+function jsonLines(root: string, name: string) {
+  return readFileSync(join(root, name), "utf8")
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line))
+}
+
+function resolutionCalls(root: string) {
+  return commands(root).filter((call) =>
+    call.args.some((argument: string) => argument.startsWith("query=mutation")),
+  )
+}
+
+test("posts a short fix explanation before resolving a verified Pi finding", () => {
+  const { result, root, json } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread]),
+    MOCK_REVIEW: fixedReview,
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(JSON.parse(json("pi.json").diff)).toEqual({
+    diff,
+    unresolved_threads: [
+      {
+        id: previousThread.id,
+        comment_id: 41,
+        path: "example.ts",
+        line: null,
+        original_line: 1,
+        side: "RIGHT",
+        body: inlineBody,
+        original_diff_hunk: diff,
+        original_commit: base,
+      },
+    ],
+  })
+  expect(jsonLines(root, "replies.jsonl")).toEqual([
+    {
+      endpoint: "repos/owner/repo/pulls/42/comments/41/replies",
+      body: `<!-- pi-action:resolution:${head} -->\nFixed in [\`bbbbbbb\`](https://github.com/owner/repo/pull/42/commits/${head}): ${reason}`,
+    },
+  ])
+  expect(jsonLines(root, "resolved.jsonl")).toEqual([{ id: previousThread.id }])
+  const calls = commands(root)
+  const summaryIndex = calls.findIndex((call) => call.args.includes("POST"))
+  const replyIndex = calls.findIndex((call) =>
+    call.args.includes("repos/owner/repo/pulls/42/comments/41/replies"),
+  )
+  const resolveIndex = calls.findIndex((call) => call.args.includes(`id=${previousThread.id}`))
+  expect(summaryIndex).toBeLessThan(replyIndex)
+  expect(replyIndex).toBeLessThan(resolveIndex)
+  expect(calls[resolveIndex - 1].args).toContain(".head.sha")
+  expect(existsSync(join(root, "posted.json"))).toBe(false)
+  expect(result.stdout).toContain(
+    "Thread resolved: https://github.com/owner/repo/pull/42#discussion_r41",
+  )
+})
+
+test.each([noFindings, { ...noFindings, resolved_threads: [] }, JSON.parse(withFinding)])(
+  "keeps earlier findings open when the model does not verify a fix: %j",
+  (review) => {
+    const { result, root } = runAction({
+      MOCK_THREADS: JSON.stringify([previousThread]),
+      MOCK_REVIEW: JSON.stringify(review),
+    })
+    expect(result.status, result.stderr).toBe(0)
+    expect(existsSync(join(root, "replies.jsonl"))).toBe(false)
+    expect(resolutionCalls(root)).toEqual([])
+  },
+)
+
+test("resolves only the supplied thread selected by the model", () => {
+  const second = {
+    ...previousThread,
+    id: "PRRT_2",
+    comments: { nodes: [{ ...previousThread.comments.nodes[0], fullDatabaseId: "42" }] },
+  }
+  const { result, root } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread, second]),
+    MOCK_REVIEW: fixedReview,
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(jsonLines(root, "replies.jsonl")).toHaveLength(1)
+  expect(jsonLines(root, "resolved.jsonl")).toEqual([{ id: previousThread.id }])
+})
+
+test("does not recheck a finding first posted at the current head", () => {
+  const sameHead = {
+    ...previousThread,
+    comments: { nodes: [{ ...previousThread.comments.nodes[0], originalCommit: { oid: head } }] },
+  }
+  const { result, root, json } = runAction({ MOCK_THREADS: JSON.stringify([sameHead]) })
+  expect(result.status, result.stderr).toBe(0)
+  expect(json("pi.json").diff).toBe(diff)
+  expect(resolutionCalls(root)).toEqual([])
+})
+
+test.each(["PRRT_unknown", "PRRT_human"])(
+  "rejects resolution of an ineligible thread %s before any writes",
+  (id) => {
+    const humanThread = {
+      ...previousThread,
+      id: "PRRT_human",
+      comments: {
+        nodes: [
+          {
+            ...previousThread.comments.nodes[0],
+            author: { __typename: "User", login: "owner" },
+          },
+        ],
+      },
+    }
+    const { result, root } = runAction({
+      MOCK_THREADS: JSON.stringify([previousThread, humanThread]),
+      MOCK_REVIEW: JSON.stringify({ ...noFindings, resolved_threads: [{ id, reason }] }),
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain("invalid or unknown thread resolution")
+    expect(existsSync(join(root, "summary.json"))).toBe(false)
+    expect(existsSync(join(root, "replies.jsonl"))).toBe(false)
+    expect(resolutionCalls(root)).toEqual([])
+  },
+)
+
+const resolutionReply = {
+  id: 43,
+  user: bot,
+  in_reply_to_id: 41,
+  body: `<!-- pi-action:resolution:${head} -->\nAn explanation already posted before a failed resolution.`,
+}
+
+test("reuses an existing same-head explanation when retrying a failed resolution", () => {
+  const { result, root } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread]),
+    MOCK_REVIEW: fixedReview,
+    MOCK_INLINE_COMMENTS: JSON.stringify([[], [resolutionReply]]),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(existsSync(join(root, "replies.jsonl"))).toBe(false)
+  expect(jsonLines(root, "resolved.jsonl")).toEqual([{ id: previousThread.id }])
+})
+
+test.each([
+  { user: { login: "owner" } },
+  { in_reply_to_id: 99 },
+  { body: `<!-- pi-action:resolution:${base} -->\nA fix at an older commit.` },
+])("does not reuse an unrelated explanation: %j", (override) => {
+  const { result, root } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread]),
+    MOCK_REVIEW: fixedReview,
+    MOCK_INLINE_COMMENTS: JSON.stringify([[{ ...resolutionReply, ...override }]]),
+  })
+  expect(result.status, result.stderr).toBe(0)
+  expect(jsonLines(root, "replies.jsonl")).toHaveLength(1)
+  expect(jsonLines(root, "resolved.jsonl")).toEqual([{ id: previousThread.id }])
+})
+
+test.each(["list-inline", "reply", "resolve"])(
+  "fails safely when the %s stage fails during thread resolution",
+  (stage) => {
+    const { result, root } = runAction({
+      MOCK_THREADS: JSON.stringify([previousThread]),
+      MOCK_REVIEW: fixedReview,
+      MOCK_FAILURE: stage,
+    })
+    expect(result.status).toBe(1)
+    expect(result.stderr).toContain(`mock ${stage} failure`)
+    expect(existsSync(join(root, "summary.json"))).toBe(stage !== "list-inline")
+    expect(existsSync(join(root, "replies.jsonl"))).toBe(stage === "resolve")
+    expect(existsSync(join(root, "resolved.jsonl"))).toBe(false)
+    expect(resolutionCalls(root)).toHaveLength(stage === "resolve" ? 1 : 0)
+  },
+)
+
+test("reports GraphQL resolution errors even when GitHub CLI exits successfully", () => {
+  const { result, root } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread]),
+    MOCK_REVIEW: fixedReview,
+    MOCK_GRAPHQL_ERRORS: "1",
+  })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("GitHub GraphQL request failed")
+  expect(jsonLines(root, "replies.jsonl")).toHaveLength(1)
+  expect(existsSync(join(root, "resolved.jsonl"))).toBe(false)
+})
+
+test.each([
+  { heads: [base], summary: false, reply: false },
+  { heads: [head, base], summary: true, reply: false },
+  { heads: [head, head, base], summary: true, reply: true },
+])("keeps the thread open when the head changes: %j", ({ heads, summary, reply }) => {
+  const { result, root } = runAction({
+    MOCK_THREADS: JSON.stringify([previousThread]),
+    MOCK_REVIEW: fixedReview,
+    MOCK_HEADS: JSON.stringify(heads),
+  })
+  expect(result.status).toBe(1)
+  expect(result.stderr).toContain("head changed")
+  expect(existsSync(join(root, "summary.json"))).toBe(summary)
+  expect(existsSync(join(root, "replies.jsonl"))).toBe(reply)
+  expect(resolutionCalls(root)).toEqual([])
 })
 
 test("cleans credentials and reports failure if inline submission fails after the summary update", () => {

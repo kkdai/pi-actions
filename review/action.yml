@@ -1,5 +1,5 @@
 name: Pi Pull Request Review
-description: Review a pull request with pi-coding-agent, update its summary, and comment inline.
+description: Review a pull request with Pi, post findings, and resolve verified fixes.
 
 inputs:
   pull-request:

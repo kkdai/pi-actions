@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 export const summaryMarker = "<!-- pi-action:summary -->";
+export const findingMarker = "<!-- pi-action:finding -->";
 const severities = ["critical", "high", "medium", "low"];
 const sides = ["LEFT", "RIGHT"];
 const bodyLimit = 65536;
@@ -17,7 +18,7 @@ function isText(value) {
 function isLine(value) {
     return typeof value === "number" && Number.isSafeInteger(value) && value > 0;
 }
-function validateOutput(raw) {
+function validateOutput(raw, threadIds) {
     let output;
     try {
         if (typeof raw !== "string")
@@ -27,7 +28,7 @@ function validateOutput(raw) {
     catch {
         throw new Error("Review output must be one JSON object without fences or prose.");
     }
-    if (!hasShape(output, ["summary", "findings"]) ||
+    if (!hasShape(output, ["summary", "findings"], ["resolved_threads"]) ||
         !isText(output.summary) ||
         !Array.isArray(output.findings)) {
         throw new Error("Invalid review schema: expected summary and findings.");
@@ -50,7 +51,25 @@ function validateOutput(raw) {
             throw new Error("Invalid review schema: invalid location.");
         }
     }
-    // The schema and every finding and location have been validated above.
+    if (Object.hasOwn(output, "resolved_threads")) {
+        if (!Array.isArray(output.resolved_threads)) {
+            throw new Error("Invalid review schema: expected an array of resolved threads.");
+        }
+        const allowed = new Set(threadIds);
+        const resolved = new Set();
+        for (const resolution of output.resolved_threads) {
+            if (!hasShape(resolution, ["id", "reason"]) ||
+                !isText(resolution.id) ||
+                !isText(resolution.reason) ||
+                resolution.reason.length > 300 ||
+                !allowed.has(resolution.id) ||
+                resolved.has(resolution.id)) {
+                throw new Error("Invalid review schema: invalid or unknown thread resolution.");
+            }
+            resolved.add(resolution.id);
+        }
+    }
+    // The schema and every finding, location, and resolution have been validated above.
     return output;
 }
 // Git quotes paths with C escapes and octal UTF-8 bytes, not JSON escapes.
@@ -257,8 +276,8 @@ function checkBody(body) {
     }
     return body;
 }
-export function buildReview(raw, diff, head, pullRequestUrl) {
-    const output = validateOutput(raw);
+export function buildReview(raw, diff, head, pullRequestUrl, threadIds = []) {
+    const output = validateOutput(raw, threadIds);
     if (typeof diff !== "string" || !isText(head)) {
         throw new Error("The diff must be a string and the reviewed head must be non-empty text.");
     }
@@ -271,7 +290,7 @@ export function buildReview(raw, diff, head, pullRequestUrl) {
         if (anchor) {
             comments.push({
                 ...anchor,
-                body: checkBody(`<!-- pi-action:finding -->\n**${label(finding)}**\n\n${finding.body}`),
+                body: checkBody(`${findingMarker}\n**${label(finding)}**\n\n${finding.body}`),
             });
             anchored.push(`| ${severityText(finding.severity)} | **${tableCell(finding.title)}** | ${tableCell(locationLink(anchor, pullRequestUrl, head))} |`);
         }
@@ -287,5 +306,9 @@ export function buildReview(raw, diff, head, pullRequestUrl) {
         sections.push(`### Summary-only findings (${general.length})\n\n${general.join("\n\n")}`);
     }
     sections.push("---", `<sub>Reviewed commit: [\`${head.slice(0, 7)}\`](${pullRequestUrl}/commits/${head}) · This review covers only the supplied diff.</sub>`);
-    return { body: checkBody(sections.join("\n\n")), comments };
+    return {
+        body: checkBody(sections.join("\n\n")),
+        comments,
+        resolvedThreads: output.resolved_threads ?? [],
+    };
 }

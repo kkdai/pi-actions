@@ -3,6 +3,7 @@ import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { escapeCommand, withPi } from "./pi.js"
 import { buildReview, summaryMarker } from "./review-output.js"
+import { listFindingThreads, resolveFindingThread } from "./review-threads.js"
 
 type GitHubComment = {
   id: number
@@ -16,6 +17,7 @@ type GitHubComment = {
   original_start_line?: number | null
   start_side?: string | null
   original_commit_id?: string
+  in_reply_to_id?: number
 }
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -71,6 +73,7 @@ function reviewPullRequest() {
 
   withPi(".pi/prompts/review-pull-request.md", ({ directory, options, run }) => {
     const repository = `repos/${env.GITHUB_REPOSITORY}`
+    const api = (args: string[]) => execFileSync("gh", ["api", ...args], options).trim()
     const { base, head } =
       eventCommits ??
       commitIds(JSON.parse(execFileSync("gh", ["api", `${repository}/pulls/${number}`], options)))
@@ -85,14 +88,26 @@ function reviewPullRequest() {
       options,
     )
     if (!diff.trim()) throw new Error("The pull request diff is empty.")
-    const diffPath = join(directory, "diff.patch")
-    writeFileSync(diffPath, diff)
+    const threads = listFindingThreads(api, env.GITHUB_REPOSITORY ?? "", number, head)
+    const inputPath = join(directory, threads.length ? "review-input.json" : "diff.patch")
+    writeFileSync(
+      inputPath,
+      threads.length ? JSON.stringify({ diff, unresolved_threads: threads }) : diff,
+    )
 
-    const review = run(diffPath, "Review the attached pull request diff.")
+    const review = run(
+      inputPath,
+      "Review the attached current pull request diff and recheck any supplied unresolved findings.",
+    )
     if (!review) throw new Error("Pi returned an empty review.")
     const pullRequestUrl = `${env.GITHUB_SERVER_URL}/${env.GITHUB_REPOSITORY}/pull/${number}`
-    const report = buildReview(review, diff, head, pullRequestUrl)
-    const api = (args: string[]) => execFileSync("gh", ["api", ...args], options).trim()
+    const report = buildReview(
+      review,
+      diff,
+      head,
+      pullRequestUrl,
+      threads.map((thread) => thread.id),
+    )
     const list = (endpoint: string): GitHubComment[] =>
       (JSON.parse(api([endpoint, "--paginate", "--slurp"])) as GitHubComment[][]).flat()
     const request = (
@@ -121,8 +136,12 @@ function reviewPullRequest() {
     const previous = summaries.find(
       (comment) => isPiBot(comment) && comment.body?.startsWith(summaryMarker),
     )
+    const inlineComments =
+      report.comments.length || report.resolvedThreads.length
+        ? list(`${repository}/pulls/${number}/comments`)
+        : []
     const published = new Set(
-      (report.comments.length ? list(`${repository}/pulls/${number}/comments`) : [])
+      inlineComments
         .filter((comment) => isPiBot(comment) && comment.original_commit_id === head)
         .map(commentKey),
     )
@@ -133,9 +152,12 @@ function reviewPullRequest() {
       return true
     })
 
-    if (api([`${repository}/pulls/${number}`, "--jq", ".head.sha"]) !== head) {
-      throw new Error("The pull request head changed during review. Rerun on the latest commit.")
+    const assertHead = () => {
+      if (api([`${repository}/pulls/${number}`, "--jq", ".head.sha"]) !== head) {
+        throw new Error("The pull request head changed during review. Rerun on the latest commit.")
+      }
     }
+    assertHead()
     const summary = request(
       previous ? "PATCH" : "POST",
       previous
@@ -153,6 +175,27 @@ function reviewPullRequest() {
         comments,
       })
       console.log(`Review posted: ${posted.html_url}`)
+    }
+
+    for (const thread of threads) {
+      const resolution = report.resolvedThreads.find((item) => item.id === thread.id)
+      if (!resolution) continue
+      assertHead()
+      const marker = `<!-- pi-action:resolution:${head} -->`
+      const explained = inlineComments.some(
+        (comment) =>
+          isPiBot(comment) &&
+          comment.in_reply_to_id === thread.comment_id &&
+          comment.body?.startsWith(`${marker}\n`),
+      )
+      if (!explained) {
+        request("POST", `${repository}/pulls/${number}/comments/${thread.comment_id}/replies`, {
+          body: `${marker}\nFixed in [\`${head.slice(0, 7)}\`](${pullRequestUrl}/commits/${head}): ${resolution.reason}`,
+        })
+      }
+      assertHead()
+      resolveFindingThread(api, thread.id)
+      console.log(`Thread resolved: ${pullRequestUrl}#discussion_r${thread.comment_id}`)
     }
   })
 }

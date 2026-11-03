@@ -51,6 +51,7 @@ test("renders a marked summary for a review without findings", () => {
   expect(result).toEqual({
     body: `${summaryMarker}\n## Pi review\n\nNo actionable findings in the supplied diff.\n\n---\n\n<sub>Reviewed commit: [\`bbbbbbb\`](${pullRequestUrl}/commits/${head}) · This review covers only the supplied diff.</sub>`,
     comments: [],
+    resolvedThreads: [],
   })
 })
 
@@ -132,6 +133,95 @@ test.each([
   expect(() => buildReview(raw([finding(null, { location })]), diff, head, pullRequestUrl)).toThrow(
     /schema/,
   )
+})
+
+test("accepts verified resolutions for supplied thread IDs without changing the summary", () => {
+  const reason = "The new guard rejects missing values before they are used."
+  const result = buildReview(
+    JSON.stringify({
+      summary: "Review complete.",
+      findings: [],
+      resolved_threads: [{ id: "PRRT_1", reason }],
+    }),
+    diff,
+    head,
+    pullRequestUrl,
+    ["PRRT_1"],
+  )
+  expect(result.resolvedThreads).toEqual([{ id: "PRRT_1", reason }])
+  expect(result.body).toBe(buildReview(raw(), diff, head, pullRequestUrl).body)
+})
+
+test("accepts empty resolutions without any supplied threads", () => {
+  const result = buildReview(
+    JSON.stringify({ summary: "Review complete.", findings: [], resolved_threads: [] }),
+    diff,
+    head,
+    pullRequestUrl,
+  )
+  expect(result.resolvedThreads).toEqual([])
+})
+
+test.each([
+  null,
+  {},
+  "PRRT_1",
+  [null],
+  [{}],
+  [{ id: "PRRT_1" }],
+  [{ id: "PRRT_1", reason: "" }],
+  [{ id: "PRRT_1", reason: " \n" }],
+  [{ id: "PRRT_1", reason: 1 }],
+  [{ id: "PRRT_1", reason: "x".repeat(301) }],
+  [{ id: "", reason: "The guard prevents a missing value." }],
+  [{ id: 1, reason: "The guard prevents a missing value." }],
+  [{ id: "PRRT_unknown", reason: "The guard prevents a missing value." }],
+  [{ id: "PRRT_1", reason: "The guard prevents a missing value.", extra: true }],
+  [
+    { id: "PRRT_1", reason: "The guard prevents a missing value." },
+    { id: "PRRT_1", reason: "The same thread must not be repeated." },
+  ],
+])("rejects invalid resolutions before publication: %j", (resolved_threads) => {
+  expect(() =>
+    buildReview(
+      JSON.stringify({ summary: "Review complete.", findings: [], resolved_threads }),
+      diff,
+      head,
+      pullRequestUrl,
+      ["PRRT_1"],
+    ),
+  ).toThrow(/schema/)
+})
+
+test("rejects all resolution IDs when no eligible threads were supplied", () => {
+  expect(() =>
+    buildReview(
+      JSON.stringify({
+        summary: "Review complete.",
+        findings: [],
+        resolved_threads: [{ id: "PRRT_1", reason: "The guard prevents a missing value." }],
+      }),
+      diff,
+      head,
+      pullRequestUrl,
+    ),
+  ).toThrow(/unknown thread resolution/)
+})
+
+test("accepts a resolution reason at the 300-character limit", () => {
+  const reason = "x".repeat(300)
+  const result = buildReview(
+    JSON.stringify({
+      summary: "Review complete.",
+      findings: [],
+      resolved_threads: [{ id: "PRRT_1", reason }],
+    }),
+    diff,
+    head,
+    pullRequestUrl,
+    ["PRRT_1"],
+  )
+  expect(result.resolvedThreads).toEqual([{ id: "PRRT_1", reason }])
 })
 
 test("renders a three-column table without duplicating the inline finding body", () => {

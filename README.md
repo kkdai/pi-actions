@@ -3,10 +3,10 @@
 Review pull requests and classify issues with
 [pi-coding-agent](https://github.com/earendil-works/pi).
 
-| Action                        | Purpose                                                                         | Documentation                        |
-| ----------------------------- | ------------------------------------------------------------------------------- | ------------------------------------ |
-| `narumiruna/pi-action/review` | Review a pull request diff, update a summary comment, and post inline findings. | [Review setup](#pull-request-review) |
-| `narumiruna/pi-action/triage` | Classify an issue and add existing repository labels.                           | [Triage guide](triage/README.md)     |
+| Action                        | Purpose                                                   | Documentation                        |
+| ----------------------------- | --------------------------------------------------------- | ------------------------------------ |
+| `narumiruna/pi-action/review` | Review a diff, post findings, and resolve verified fixes. | [Review setup](#pull-request-review) |
+| `narumiruna/pi-action/triage` | Classify an issue and add existing repository labels.     | [Triage guide](triage/README.md)     |
 
 The review action does not approve or reject pull requests. The triage action does
 not create or remove labels or post comments.
@@ -139,6 +139,11 @@ To use a repository prompt, check out a trusted revision before the action and
 set `prompt` to the Markdown file path. Never load a prompt from an untrusted pull
 request head.
 
+When earlier unresolved Pi findings are available, the input is a JSON object
+with `diff` and `unresolved_threads`. Each thread includes its ID, finding, file
+location, original diff hunk, and original commit. Otherwise, the input is the raw
+diff.
+
 Custom prompts must return only a JSON object with `summary` and `findings`, using
 the schema in the bundled prompt:
 
@@ -153,7 +158,18 @@ the schema in the bundled prompt:
       within one diff hunk, and `line` is its last line.
     - Use `location: null` when there is no exact location in the diff.
 
-Extra fields, Markdown fences, and prose outside the JSON object are not
+The optional `resolved_threads` array identifies verified fixes. Each entry must
+have exactly `id` and `reason`:
+
+- `id` must identify a supplied unresolved thread and must not be repeated.
+- `reason` must be a non-empty string of at most 300 characters. Use one short
+  sentence in simple technical English. Explain the code change and why it fixes
+  the issue; the action posts this text before resolving the thread.
+
+Omit `resolved_threads` or return `[]` to leave all earlier threads open. Existing
+custom prompts that return only `summary` and `findings` remain valid.
+
+Other fields, Markdown fences, and prose outside the JSON object are not
 supported. The finding body can contain Markdown.
 
 ## Review comments
@@ -163,7 +179,7 @@ supported. The finding body can contain Markdown.
 The first run creates a Pi summary comment in the pull request conversation.
 Later runs update the same comment with the current summary, findings, and
 reviewed commit. The action updates only its marked `github-actions[bot]`
-comments; it does not change user comments or historical reviews.
+comments; it does not edit user comments or historical review bodies.
 
 The summary starts with the review result. Finding sections show their counts:
 
@@ -185,26 +201,45 @@ at the reviewed head commit. Single lines, multiline ranges, and removed lines
 are supported. The action does not submit an empty review.
 
 Identical findings at the same commit are not posted twice. A new commit can
-create new threads. Old threads are not deleted or resolved.
+create new threads. Old threads are not deleted.
+
+### Automatic resolution
+
+On later reviews, Pi rechecks unresolved threads started by its marked
+`github-actions[bot]` findings from earlier commits. It resolves a thread only
+when the current diff shows a concrete change that fixes that specific issue.
+
+Before resolving the thread, the action posts a reply with the reviewed commit
+and a short explanation in simple technical English. If the reply fails, the
+thread stays open.
+
+The action leaves a thread open when the evidence is incomplete. An outdated
+comment, a finding absent from the new review, or a reply that says "Fixed" is not
+proof of a fix. Findings first posted at the current head are not rechecked.
+Already resolved threads and threads started by humans or other bots are not
+changed.
 
 ## Review limits and failures
 
-- **Diff-only context:** Pi receives only the diff returned by GitHub. It does
-  not inspect other repository files or run pull request code. GitHub diff limits
-  and model context limits apply.
+- **Diff-only code context:** Pi receives the current diff and any eligible
+  earlier Pi findings with their original diff hunks. It does not inspect other
+  repository files or run pull request code. A fix outside the supplied current
+  diff cannot be verified. GitHub diff limits and model context limits apply.
 - **Isolated Pi run:** Tools, extensions, skills, project configuration, and
   session storage are disabled. GitHub tokens are not passed to Pi.
 - **Commit selection:** Pull request events use their base and head commits.
   Manual runs fetch the current commit IDs from GitHub before reading the diff.
-- **Changed pull request:** Before publication, the action checks the current
-  head. A mismatch fails the run without publishing its result. This check is not
-  atomic with the comment writes; rerun on the latest commit.
+- **Changed pull request:** The action checks the current head before initial
+  publication, before each fix reply, and before resolving each thread. A
+  mismatch stops further writes. These checks are not atomic with GitHub writes;
+  rerun on the latest commit.
 - **Action failures:** Diff retrieval errors, empty diffs, model errors, invalid
   model output, oversized comments, and GitHub API errors fail the action.
   Findings alone do not fail it.
-- **Partial publication:** The summary is saved before inline submission. If
-  inline submission fails, the summary can already exist. Rerun the workflow to
-  complete publication.
+- **Partial publication:** The summary is saved before inline submission and
+  thread resolution. A failed run can leave a summary, inline findings, or fix
+  replies already posted. Rerun to complete publication. A same-head retry reuses
+  an existing fix reply instead of posting another one.
 
 ## Development
 
@@ -253,5 +288,9 @@ pull request to check:
 3. Push a new commit. Check that the same summary shows the new head and that new
    inline comments are attached to it. Keep intentionally broken test pull
    requests as drafts.
+4. Fix one earlier finding with a change visible in the current diff, but leave
+   another finding unfixed. Check that the next review posts a short fix reply
+   and resolves only the fixed thread. Rerun and check that the reply is not
+   duplicated.
 
 For live label checks, follow the [triage verification guide](triage/README.md#verify-in-github).
