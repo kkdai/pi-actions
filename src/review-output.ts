@@ -267,8 +267,12 @@ function findAnchor(location: FindingLocation | null, files: DiffFile[]): Review
   }
 }
 
+function severityText(severity: Severity) {
+  return `${severity[0].toUpperCase()}${severity.slice(1)}`
+}
+
 function label(finding: Finding) {
-  return `${finding.severity[0].toUpperCase()}${finding.severity.slice(1)}: ${finding.title}`
+  return `${severityText(finding.severity)}: ${finding.title}`
 }
 
 function locationText(location: FindingLocation | null) {
@@ -287,7 +291,15 @@ function locationLink(location: ReviewAnchor, pullRequestUrl: string, head: stri
   const side = location.side === "LEFT" ? "L" : "R"
   const range = location.start_line ? `${side}${location.start_line}-` : ""
   const url = `${pullRequestUrl}/files/${head}#diff-${hash}${range}${side}${location.line}`
-  return `[${locationText(location)}](${url})`
+  const path = location.path.slice(location.path.lastIndexOf("/") + 1)
+  const title = location.path
+    .replace(/[\\"]/g, "\\$&")
+    .replace(/[&\r\n]/g, (character) => `&#${character.charCodeAt(0)};`)
+  return `[${locationText({ ...location, path })}](${url} "${title}")`
+}
+
+function tableCell(text: string) {
+  return text.replace(/[\r\n]+/g, " ").replace(/\|/g, "\\|")
 }
 
 function checkBody(body: string) {
@@ -313,14 +325,18 @@ export function buildReview(raw: unknown, diff: unknown, head: unknown, pullRequ
         ...anchor,
         body: checkBody(`<!-- pi-action:finding -->\n**${label(finding)}**\n\n${finding.body}`),
       })
-      anchored.push(`- **${label(finding)}**  \n  ${locationLink(anchor, pullRequestUrl, head)}`)
+      anchored.push(
+        `| ${severityText(finding.severity)} | **${tableCell(finding.title)}** | ${tableCell(locationLink(anchor, pullRequestUrl, head))} |`,
+      )
     } else {
       general.push(`#### ${label(finding)}\n\n${locationText(finding.location)}\n\n${finding.body}`)
     }
   }
   const sections = [`${summaryMarker}\n## Pi review`, output.summary]
   if (anchored.length) {
-    sections.push(`### Inline findings (${anchored.length})\n\n${anchored.join("\n\n")}`)
+    sections.push(
+      `### Inline findings (${anchored.length})\n\n| Severity | Finding | Location |\n| --- | --- | --- |\n${anchored.join("\n")}`,
+    )
   }
   if (general.length) {
     sections.push(`### Summary-only findings (${general.length})\n\n${general.join("\n\n")}`)

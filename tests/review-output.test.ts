@@ -134,7 +134,7 @@ test.each([
   )
 })
 
-test("anchors a single-line addition and lists it without duplicating its full body", () => {
+test("renders a three-column table without duplicating the inline finding body", () => {
   const result = buildReview(raw([finding(addition)]), diff, head, pullRequestUrl)
   expect(result.comments).toEqual([
     {
@@ -143,12 +143,12 @@ test("anchors a single-line addition and lists it without duplicating its full b
     },
   ])
   expect(result.body).toContain(
-    `### Inline findings (1)\n\n- **High: Check the result**  \n  [\`example.ts:2\`](${fileDiffUrl}R2)`,
+    `### Inline findings (1)\n\n| Severity | Finding | Location |\n| --- | --- | --- |\n| High | **Check the result** | [\`example.ts:2\`](${fileDiffUrl}R2 "example.ts") |`,
   )
   expect(result.body).not.toContain("The result can be missing")
 })
 
-test("puts the summary first, separates finding locations, and keeps metadata last", () => {
+test("keeps the summary first, findings in order, and metadata last", () => {
   const result = buildReview(
     raw([
       finding(addition),
@@ -163,7 +163,7 @@ test("puts the summary first, separates finding locations, and keeps metadata la
     [
       `${summaryMarker}\n## Pi review`,
       "Review complete.",
-      `### Inline findings (2)\n\n- **High: Check the result**  \n  [\`example.ts:2\`](${fileDiffUrl}R2)\n\n- **Medium: Keep the checkbox state**  \n  [\`example.ts:2\`](${fileDiffUrl}R2)`,
+      `### Inline findings (2)\n\n| Severity | Finding | Location |\n| --- | --- | --- |\n| High | **Check the result** | [\`example.ts:2\`](${fileDiffUrl}R2 "example.ts") |\n| Medium | **Keep the checkbox state** | [\`example.ts:2\`](${fileDiffUrl}R2 "example.ts") |`,
       "### Summary-only findings (1)\n\n#### Low: Check the fallback\n\nGeneral finding\n\nThe result can be missing. Check it before use.",
       "---",
       `<sub>Reviewed commit: [\`bbbbbbb\`](${pullRequestUrl}/commits/${head}) · This review covers only the supplied diff.</sub>`,
@@ -172,10 +172,14 @@ test("puts the summary first, separates finding locations, and keeps metadata la
 })
 
 test.each([
-  ["a[`b`].ts", "`` a[`b`].ts:1 ``"],
-  ["a``b.ts", "``` a``b.ts:1 ```"],
-])("keeps backticks in the location link label for %s", (path, label) => {
-  const patch = `--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`
+  ["a[`b`].ts", "`` a[`b`].ts:1 ``", "a[`b`].ts"],
+  ["a``b.ts", "``` a``b.ts:1 ```", "a``b.ts"],
+  ["a\\|b.ts", "`a\\\\|b.ts:1`", "a\\\\\\|b.ts"],
+  ["a\nb.ts", "`a b.ts:1`", "a&#10;b.ts"],
+  ["a\r\nb.ts", "`a b.ts:1`", "a&#13;&#10;b.ts"],
+  ["a&amp;b.ts", "`a&amp;b.ts:1`", "a&#38;amp;b.ts"],
+])("escapes filenames in table location links: %s", (path, label, tooltip) => {
+  const patch = `--- ${JSON.stringify(`a/${path}`)}\n+++ ${JSON.stringify(`b/${path}`)}\n@@ -1 +1 @@\n-old\n+new\n`
   const result = buildReview(
     raw([finding({ path, line: 1, side: "RIGHT" })]),
     patch,
@@ -183,7 +187,37 @@ test.each([
     pullRequestUrl,
   )
   expect(result.body).toContain(`[${label}](${pullRequestUrl}/files/${head}#diff-`)
+  expect(result.body).toContain(`R1 "${tooltip}") |`)
   expect(result.comments).toHaveLength(1)
+})
+
+test("shows the filename and keeps the full path in the diff link tooltip", () => {
+  const path = "apps/bot/src/telegram/rendering.ts"
+  const result = buildReview(
+    raw([finding({ ...addition, path })]),
+    diff.replaceAll("example.ts", path),
+    head,
+    pullRequestUrl,
+  )
+  expect(result.body).toContain(
+    `[\`rendering.ts:2\`](${pullRequestUrl}/files/${head}#diff-d8ee40951ce58f888969fd74dd95b470d6abbf1f1f1bf4292fce5530574f766dR2 "${path}")`,
+  )
+  expect(result.comments[0].path).toBe(path)
+})
+
+test("escapes pipes, quotes, and line breaks in table cells without changing inline text", () => {
+  const path = 'src/a|"b.ts'
+  const title = "Keep `a|b`\r\nsafe"
+  const entry = finding({ path, line: 1, side: "RIGHT" }, { title })
+  const patch = `--- ${JSON.stringify(`a/${path}`)}\n+++ ${JSON.stringify(`b/${path}`)}\n@@ -1 +1 @@\n-old\n+new\n`
+  const result = buildReview(raw([entry]), patch, head, pullRequestUrl)
+  expect(result.body).toContain("| High | **Keep `a\\|b` safe** |")
+  expect(result.body).toContain('[`a\\|"b.ts:1`](')
+  expect(result.body).toContain('R1 "src/a\\|\\"b.ts") |')
+  expect(result.comments[0]).toMatchObject({
+    path,
+    body: `<!-- pi-action:finding -->\n**High: ${title}**\n\n${entry.body}`,
+  })
 })
 
 test.each(["critical", "high", "medium", "low"])("capitalizes %s inline severity", (severity) => {
@@ -199,8 +233,8 @@ test("anchors deleted lines on LEFT and context lines on RIGHT", () => {
   expect(result.comments).toHaveLength(2)
   expect(result.comments[0]).toMatchObject(deleted)
   expect(result.comments[1]).toMatchObject(context)
-  expect(result.body).toContain(`[\`example.ts:2\` (removed)](${fileDiffUrl}L2)`)
-  expect(result.body).toContain(`[\`example.ts:4\`](${fileDiffUrl}R4)`)
+  expect(result.body).toContain(`[\`example.ts:2\` (removed)](${fileDiffUrl}L2 "example.ts")`)
+  expect(result.body).toContain(`[\`example.ts:4\`](${fileDiffUrl}R4 "example.ts")`)
   expect(result.body).not.toContain("(LEFT)")
   expect(result.body).not.toContain("(RIGHT)")
 })
@@ -224,8 +258,8 @@ test("renders a RIGHT range with start_side and omits range fields for one line"
   })
   expect(result.comments[1]).not.toHaveProperty("start_line")
   expect(result.comments[1]).not.toHaveProperty("start_side")
-  expect(result.body).toContain(`[\`example.ts:2-4\`](${fileDiffUrl}R2-R4)`)
-  expect(result.body).toContain(`[\`example.ts:2\`](${fileDiffUrl}R2)`)
+  expect(result.body).toContain(`[\`example.ts:2-4\`](${fileDiffUrl}R2-R4 "example.ts")`)
+  expect(result.body).toContain(`[\`example.ts:2\`](${fileDiffUrl}R2 "example.ts")`)
 })
 
 test("renders a multiline deletion with LEFT start_side", () => {
@@ -244,7 +278,7 @@ test("renders a multiline deletion with LEFT start_side", () => {
     side: "LEFT",
   })
   expect(result.body).toContain("[`old.ts:4-5` (removed)]")
-  expect(result.body).toContain("L4-L5)")
+  expect(result.body).toContain('L4-L5 "old.ts")')
 })
 
 test.each([
@@ -348,8 +382,8 @@ test("maps multiple files, renamed paths, deleted files, and added files", () =>
     { path: "added.ts", line: 1, side: "RIGHT" },
   ])
   const renamedDiffUrl = `${pullRequestUrl}/files/${head}#diff-7cef4b02d457cff42f437223bda0d5827afe4833a5e149f7e2eb141839e391a3`
-  expect(result.body).toContain(`[\`new.ts:5\` (removed)](${renamedDiffUrl}L5)`)
-  expect(result.body).toContain(`[\`new.ts:5\`](${renamedDiffUrl}R5)`)
+  expect(result.body).toContain(`[\`new.ts:5\` (removed)](${renamedDiffUrl}L5 "new.ts")`)
+  expect(result.body).toContain(`[\`new.ts:5\`](${renamedDiffUrl}R5 "new.ts")`)
 })
 
 test("prefers the canonical destination when a renamed source path is reused by a new file", () => {
