@@ -1,5 +1,5 @@
 ---
-"pi-action": major
+"pi-action": patch
 ---
 
 Move the pull request review action from the repository root to `review/action.yml`.
