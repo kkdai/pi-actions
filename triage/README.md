@@ -5,7 +5,8 @@ not create labels, remove labels, or post comments.
 
 ## Usage
 
-Create `.github/workflows/triage.yml`:
+Save an API key for your provider as the `PI_API_KEY` GitHub Actions secret. Then
+create `.github/workflows/triage.yml`:
 
 ```yaml
 name: Issue Triage
@@ -42,10 +43,28 @@ GitHub CLI; `ubuntu-latest` includes both. The action installs Node.js and Pi.
 
 ## Inputs
 
-The action accepts the same `auth-json`, `api-key`, `base-url`, `provider`, `model`,
-and `thinking` inputs as the [review action](../review/README.md#inputs), with
-the same defaults. Provide exactly one of `api-key` or `auth-json` as a GitHub
-Actions secret. For Pi OAuth credentials, use `auth-json` and the matching provider.
+| Input       | Required             | Default                       | Description                                                                                                        |
+| ----------- | -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `api-key`   | One credential input | —                             | API key for the selected provider.                                                                                 |
+| `auth-json` | One credential input | —                             | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
+| `base-url`  | No                   | —                             | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
+| `provider`  | No                   | `openai`                      | Pi provider ID.                                                                                                    |
+| `model`     | No                   | `gpt-6.1-sol`                 | Model ID in the selected provider's Pi catalog.                                                                    |
+| `thinking`  | No                   | `medium`                      | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
+| `prompt`    | No                   | `.pi/prompts/triage-issue.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
+
+Provide exactly one of `api-key` or `auth-json`, stored as a GitHub Actions secret.
+The workflow's `GITHUB_TOKEN` needs `issues: write`.
+
+### Use Pi credentials
+
+Run `/login` in Pi and save the contents of `~/.pi/agent/auth.json` as the
+`PI_AUTH_JSON` repository secret. Replace `api-key` with
+`auth-json: ${{ secrets.PI_AUTH_JSON }}` and set `provider` to the provider ID
+whose credential is in the file. For an `openai-codex` login, use
+`provider: openai-codex` and select a model from that provider's Pi catalog.
+
+### Use a custom triage prompt
 
 The `prompt` input defaults to
 [`.pi/prompts/triage-issue.md`](../.pi/prompts/triage-issue.md). A workspace copy at
@@ -88,6 +107,54 @@ non-JSON output fail the action before any labels are applied.
   authorization for a privileged workflow.
 - GitHub API errors, model errors, invalid output, and context limits can fail the
   action. The action does not retry failed writes automatically.
+
+## Troubleshooting
+
+### Credential or provider errors
+
+For `Provide exactly one of api-key or auth-json.`, check that the selected
+secret exists and is available to the workflow. Do not pass both inputs.
+
+For provider authentication errors, check that the credential matches
+`provider`. For expired or rotated OAuth credentials, run `/login` in Pi again
+and replace the GitHub Actions secret. Refreshed credentials are not saved back
+to the secret. Use a `model` from the selected provider's Pi catalog; changing
+`base-url` does not add models or change the API protocol.
+
+### GitHub permission errors
+
+For GitHub `403` errors, grant `issues: write` to the job's `GITHUB_TOKEN`.
+Check repository and organization Actions policies if writes are still blocked.
+Pi credentials do not grant GitHub access.
+
+### No labels are added
+
+Check the action log:
+
+- `Skipping unsupported issue activity.`: use an `issues` event with
+  `opened`, `edited`, or `reopened`.
+- `Skipping a closed issue.`: classification requires an open issue.
+- `Skipping a repository without labels.`: create repository labels first.
+- `No labels selected.`: no label was selected for the supplied issue. Check
+  the label names, descriptions, and [prompt rules](#use-a-custom-triage-prompt).
+- `No new labels to apply.`: all selected labels are already on the issue.
+  No action is needed.
+
+### Missing prompt or invalid model output
+
+For `The prompt file does not exist.`, check the workspace-relative `prompt`
+path. A repository prompt needs a checkout of a trusted revision.
+
+For invalid JSON, schema errors, or unknown labels, check the
+[custom prompt contract](#use-a-custom-triage-prompt). The response must contain
+only a `labels` array with exact existing label names. Do not add Markdown
+fences or prose outside the JSON object. Invalid output does not add labels.
+
+### The issue changed during triage
+
+Rerun the workflow when the issue is open and its title and body are stable.
+The action reads the current issue again. Labels added by other runs or
+maintainers are preserved.
 
 ## Verify in GitHub
 
