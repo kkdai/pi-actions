@@ -43,9 +43,9 @@ GitHub CLI; `ubuntu-latest` includes both. The action installs Node.js and Pi.
 ## Inputs
 
 The action accepts the same `auth-json`, `api-key`, `base-url`, `provider`, `model`,
-and `thinking` inputs as the [review action](../README.md#inputs), with the same
-defaults. Provide exactly one of `api-key` or `auth-json` as a GitHub Actions secret.
-For Pi OAuth credentials, use `auth-json` and the matching provider.
+and `thinking` inputs as the [review action](../review/README.md#inputs), with
+the same defaults. Provide exactly one of `api-key` or `auth-json` as a GitHub
+Actions secret. For Pi OAuth credentials, use `auth-json` and the matching provider.
 
 The `prompt` input defaults to
 [`.pi/prompts/triage-issue.md`](../.pi/prompts/triage-issue.md). A workspace copy at
