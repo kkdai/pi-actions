@@ -1,0 +1,26 @@
+name: Pi Pull Request Rebase
+description: Rebase outdated pull request branches with GitHub without checking out their code.
+
+inputs:
+  pull-request:
+    description: Optional pull request number for workflow_dispatch. Empty selects all PRs targeting the default branch. Ignored for other events.
+    required: false
+  token:
+    description: GitHub token with contents and pull-requests write permissions.
+    required: false
+    default: ${{ github.token }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26
+
+    - name: Rebase pull requests
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        PI_PULL_REQUEST: ${{ inputs.pull-request }}
+      run: node "$GITHUB_ACTION_PATH/../dist/rebase.js"

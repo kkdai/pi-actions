@@ -1,12 +1,14 @@
 # Pi GitHub Actions
 
 Review pull requests and classify issues with
-[pi-coding-agent](https://github.com/earendil-works/pi).
+[pi-coding-agent](https://github.com/earendil-works/pi). Rebase outdated pull
+request branches with GitHub.
 
 | Action                        | Purpose                                                   | Documentation                        |
 | ----------------------------- | --------------------------------------------------------- | ------------------------------------ |
 | `narumiruna/pi-action/review` | Review a diff, post findings, and resolve verified fixes. | [Review setup](#pull-request-review) |
 | `narumiruna/pi-action/triage` | Classify an issue and add existing repository labels.     | [Triage guide](triage/README.md)     |
+| `narumiruna/pi-action/rebase` | Rebase outdated pull request branches without a checkout. | [Rebase guide](rebase/README.md)     |
 
 The review action does not approve or reject pull requests. The triage action does
 not create or remove labels or post comments.
@@ -86,7 +88,8 @@ number from the event and ignore this input.
 
 These inputs apply to the review action. The triage action shares the credential,
 provider, model, and thinking inputs; see the [triage guide](triage/README.md) for
-its prompt and workflow.
+its prompt and workflow. The rebase action has separate inputs and does not need
+Pi credentials; see the [rebase guide](rebase/README.md).
 
 | Input          | Required             | Default                              | Description                                                                                                        |
 | -------------- | -------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
@@ -252,14 +255,14 @@ npm run ci
 
 The package is private and does not expose a supported npm library API.
 
-| Path                                     | Purpose                                                                 |
-| ---------------------------------------- | ----------------------------------------------------------------------- |
-| `review/action.yml`, `triage/action.yml` | Composite action manifests.                                             |
-| `src/`                                   | TypeScript runtime: review, review output, triage, and shared Pi setup. |
-| `dist/`                                  | Compiled ESM JavaScript used by both actions.                           |
-| `.pi/prompts/`                           | Bundled review and triage prompts.                                      |
-| `tests/`                                 | Runtime, workflow, and distribution tests.                              |
-| `scripts/`                               | Development scripts.                                                    |
+| Path                                                          | Purpose                                                             |
+| ------------------------------------------------------------- | ------------------------------------------------------------------- |
+| `review/action.yml`, `triage/action.yml`, `rebase/action.yml` | Composite action manifests.                                         |
+| `src/`                                                        | TypeScript runtime for review, triage, rebase, and shared Pi setup. |
+| `dist/`                                                       | Compiled ESM JavaScript used by the actions.                        |
+| `.pi/prompts/`                                                | Bundled review and triage prompts.                                  |
+| `tests/`                                                      | Runtime, workflow, and distribution tests.                          |
+| `scripts/`                                                    | Development scripts.                                                |
 
 `npm run build` compiles the runtime with strict type checks. `npm test` builds
 before running tests against the compiled files. `npm run ci` runs the code
@@ -271,8 +274,8 @@ directly. CI rebuilds the action and rejects changed or untracked files in
 build when they use the bundled prompts.
 
 Distribution tests run each manifest command from a copied action directory
-containing only `dist/`, `package.json`, bundled prompts, and the action
-subdirectory. They also check missing runtime modules and prompts.
+containing only `dist/`, `package.json`, the action subdirectory, and any required
+bundled prompts. They also check missing runtime modules and prompts.
 
 ### Verify comments in GitHub
 
@@ -294,3 +297,4 @@ pull request to check:
    duplicated.
 
 For live label checks, follow the [triage verification guide](triage/README.md#verify-in-github).
+For live rebase checks, follow the [rebase verification guide](rebase/README.md#verify-in-github).

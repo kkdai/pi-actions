@@ -1,7 +1,7 @@
 {
   "name": "pi-action",
   "version": "0.1.0",
-  "description": "GitHub Actions for pull request review and issue triage with Pi.",
+  "description": "GitHub Actions for Pi reviews, issue triage, and native pull request rebasing.",
   "private": true,
   "type": "module",
   "repository": {
