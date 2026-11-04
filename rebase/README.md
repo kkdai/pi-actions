@@ -127,6 +127,58 @@ Updates made with that token can trigger this workflow again. The native
 up-to-date check prevents another rebase when the branch already includes the
 base branch. Verify CI event delivery before relying on this automation.
 
+## Troubleshooting
+
+### The pull request is skipped
+
+Check the reason in `Skipping pull request #...`. The action requires an open,
+non-draft pull request with a branch in the same repository. Fork branches are
+always skipped. Resolve known merge conflicts manually.
+
+A batch also skips requests whose base branch changed after discovery. Check
+the current base branch before starting another run.
+
+### Rebase conflicts or `rebase not prepared`
+
+Resolve conflicts in a trusted development environment, update the pull request
+branch, and run the workflow again. The action cannot resolve conflicts and does
+not fall back to a merge.
+
+For `rebase not prepared`, wait for GitHub to prepare the update, then rerun the
+workflow. Failed requests are not retried automatically.
+
+### GitHub permission or branch rule errors
+
+Check that `token` has `contents: write` and `pull-requests: write` for the
+repository. Repository rules must also allow the branch update. Changes to
+workflow files can need additional token permissions. Use an authorized token
+as described in [Security and CI](#security-and-ci); do not disable branch
+protection to make the action pass.
+
+### Missing GitHub CLI or unsupported `--rebase`
+
+The runner must have Bash and GitHub CLI. If `gh` is missing or
+`gh pr update-branch --rebase` is not supported, install or update GitHub CLI.
+The action installs Node.js, not GitHub CLI.
+
+### The run succeeds but the head or CI has not changed
+
+GitHub CLI leaves an up-to-date branch unchanged. For an accepted update,
+GitHub can take time to publish the new head. Check the pull request again
+after GitHub finishes; the action does not wait for completion.
+
+If the branch changed but CI did not start, check workflow event filters and
+the [token event rules](#security-and-ci). Updates made with `GITHUB_TOKEN`
+do not start `push` workflows. Supported `pull_request` runs can require
+maintainer approval.
+
+### A batch only partly succeeds
+
+Successful updates are not reversed when another pull request fails. Check the
+error for each failed request. After correcting the cause, use
+[the manual workflow](#usage) with `pull-request` set to one failed request's
+number to retry only that request.
+
 ## Verify in GitHub
 
 Local tests mock GitHub CLI. They do not verify live permissions, branch

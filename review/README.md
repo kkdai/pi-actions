@@ -229,6 +229,61 @@ changed.
   replies already posted. Rerun to complete publication. A same-head retry reuses
   an existing fix reply instead of posting another one.
 
+## Troubleshooting
+
+### Credential or provider errors
+
+For `Provide exactly one of api-key or auth-json.`, check that the selected
+secret exists and is available to the workflow. Do not pass both inputs.
+
+For provider authentication errors, check that the credential matches
+`provider`. For expired or rotated OAuth credentials, repeat the
+[Pi login setup](#use-pi-credentials) and replace the GitHub Actions secret.
+Use a `model` from the selected provider's Pi catalog; changing `base-url`
+does not add models or change the API protocol.
+
+### GitHub permission errors and fork pull requests
+
+For GitHub `403` errors, check that the job's `GITHUB_TOKEN` has
+`contents: read` and `pull-requests: write`. Repository and organization
+Actions policies can also restrict writes.
+
+Fork runs with `pull_request` normally have no secrets and a read-only token.
+Use the trusted `pull_request_target` workflow from
+[Workflow security](#workflow-security). Do not check out or execute the pull
+request head to obtain access to secrets.
+
+### Missing prompt or invalid model output
+
+For `The prompt file does not exist.`, check the workspace-relative `prompt`
+path. A repository prompt needs a checkout of a trusted revision.
+
+For JSON parsing or review schema errors, follow the
+[custom prompt contract](#use-a-custom-review-prompt). Return only the supported
+JSON object, without Markdown fences or prose outside it. Invalid output fails
+before the action publishes comments.
+
+### The pull request changed or has an empty diff
+
+If the head changed during review, start a run for the latest commit. Use a new
+pull request event or a [manual review](#manual-reviews). Rerunning an old pull
+request event still uses its original base and head commits.
+
+For `The pull request diff is empty.`, confirm that the pull request has changes
+against its base branch. The action cannot review an empty diff.
+
+### Output limits or partial publication
+
+For model context limits, reduce the pull request size or select a supported
+model with a larger context window. For an oversized review body, use a custom
+prompt that returns shorter summaries and finding explanations, or split the
+pull request.
+
+A failed run can leave comments or fix replies already posted. Fix the reported
+error before retrying. At an unchanged head, the action does not post identical
+inline findings again and reuses existing fix replies. If the head changed,
+start a run for the latest commit instead.
+
 ## Verify in GitHub
 
 Local tests mock Pi and GitHub. They do not verify live model output, GitHub
