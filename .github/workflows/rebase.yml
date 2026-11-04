@@ -1,0 +1,34 @@
+name: PR Rebase
+
+on:
+  push:
+    branches:
+      - main
+  pull_request_target:
+    branches:
+      - main
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+  workflow_dispatch:
+    inputs:
+      pull-request:
+        description: Pull request number (empty selects all PRs targeting the default branch)
+        required: false
+        type: string
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: pi-rebase-${{ github.event.pull_request.number || inputs.pull-request || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  rebase:
+    # Use trusted action code. Never check out the pull request head.
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: narumiruna/pi-action/rebase@main
+        with:
+          pull-request: ${{ inputs.pull-request }}
