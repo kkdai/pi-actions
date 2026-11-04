@@ -1,5 +1,11 @@
 # pi-action
 
+## 0.2.0
+
+### Minor Changes
+
+- 5aaa7e3: Add a rebase action that uses GitHub to rebase outdated pull request branches on base branch pushes, pull request events, or manual runs. Skip drafts, forks, and known merge conflicts without checking out pull request code.
+
 ## 0.1.0
 
 ### Minor Changes
