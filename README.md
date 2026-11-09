@@ -10,6 +10,14 @@ request branches with GitHub.
 | `narumiruna/pi-action/triage` | Classify an issue and add existing repository labels.     | [Triage guide](triage/README.md) |
 | `narumiruna/pi-action/rebase` | Rebase outdated pull request branches without a checkout. | [Rebase guide](rebase/README.md) |
 
+## OAuth credentials
+
+Review and triage support opt-in persistence of refreshed OAuth credentials to an
+existing GitHub Actions environment secret in the caller repository. Follow the
+[OAuth setup and migration guide](docs/oauth.md) for writer permissions, the shared
+job lock, recovery, and required live checks. Owner setup and a published, pinned
+action revision are required before activation. API-key examples are unchanged.
+
 ## Development
 
 Use Node.js 26, as in CI, and run:

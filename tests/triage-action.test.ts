@@ -278,6 +278,7 @@ test("runs the manifest from a distribution-only action directory with spaces", 
 
 test.each([
   ["dist/pi.js", "ERR_MODULE_NOT_FOUND"],
+  ["dist/oauth-secret.js", "ERR_MODULE_NOT_FOUND"],
   [defaultPrompt, "The prompt file does not exist."],
 ])("fails safely when the distribution is missing %s", (path, message) => {
   const directory = copyDistribution()

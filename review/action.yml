@@ -8,6 +8,15 @@ inputs:
   auth-json:
     description: Contents of Pi's auth.json. Provide this or api-key, not both.
     required: false
+  auth-secret:
+    description: Existing environment secret to update after OAuth refresh. Requires auth-environment and auth-token.
+    required: false
+  auth-environment:
+    description: Environment that owns auth-secret and is attached to the caller's serialized job.
+    required: false
+  auth-token:
+    description: GitHub token with Environments write permission, such as an existing PAT_TOKEN. Requires auth-secret and auth-environment.
+    required: false
   api-key:
     description: API key for the selected provider. Provide this or auth-json, not both.
     required: false
@@ -49,6 +58,9 @@ runs:
         GH_TOKEN: ${{ github.token }}
         PI_PULL_REQUEST: ${{ inputs.pull-request }}
         PI_AUTH_JSON: ${{ inputs.auth-json }}
+        PI_AUTH_SECRET: ${{ inputs.auth-secret }}
+        PI_AUTH_ENVIRONMENT: ${{ inputs.auth-environment }}
+        PI_AUTH_TOKEN: ${{ inputs.auth-token }}
         PI_API_KEY: ${{ inputs.api-key }}
         PI_BASE_URL: ${{ inputs.base-url }}
         PI_PROVIDER: ${{ inputs.provider }}

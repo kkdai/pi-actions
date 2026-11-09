@@ -76,16 +76,19 @@ number from the event and ignore this input.
 
 ## Inputs
 
-| Input          | Required             | Default                              | Description                                                                                                        |
-| -------------- | -------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
-| `pull-request` | Manual runs only     | —                                    | Positive integer pull request number for `workflow_dispatch`. Ignored for pull request events.                     |
-| `api-key`      | One credential input | —                                    | API key for the selected provider.                                                                                 |
-| `auth-json`    | One credential input | —                                    | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
-| `base-url`     | No                   | —                                    | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
-| `provider`     | No                   | `openai`                             | Pi provider ID.                                                                                                    |
-| `model`        | No                   | `gpt-6.1-sol`                        | Model ID in the selected provider's Pi catalog.                                                                    |
-| `thinking`     | No                   | `medium`                             | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
-| `prompt`       | No                   | `.pi/prompts/review-pull-request.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
+| Input              | Required             | Default                              | Description                                                                                                        |
+| ------------------ | -------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ |
+| `pull-request`     | Manual runs only     | —                                    | Positive integer pull request number for `workflow_dispatch`. Ignored for pull request events.                     |
+| `api-key`          | One credential input | —                                    | API key for the selected provider.                                                                                 |
+| `auth-json`        | One credential input | —                                    | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
+| `auth-secret`      | With persistence     | —                                    | Existing environment secret to update. Requires `auth-environment`, `auth-token`, and OAuth `auth-json`.           |
+| `auth-environment` | With persistence     | —                                    | Environment that owns the secret and is attached to the caller's job.                                              |
+| `auth-token`       | With persistence     | —                                    | GitHub token with repository `Environments: write` permission. An existing `PAT_TOKEN` can be reused.              |
+| `base-url`         | No                   | —                                    | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
+| `provider`         | No                   | `openai`                             | Pi provider ID.                                                                                                    |
+| `model`            | No                   | `gpt-6.1-sol`                        | Model ID in the selected provider's Pi catalog.                                                                    |
+| `thinking`         | No                   | `medium`                             | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
+| `prompt`           | No                   | `.pi/prompts/review-pull-request.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
 
 Provide exactly one of `api-key` or `auth-json`, stored as a GitHub Actions secret.
 The review workflow's `GITHUB_TOKEN` needs `contents: read` and
@@ -93,28 +96,27 @@ The review workflow's `GITHUB_TOKEN` needs `contents: read` and
 
 ### Use Pi credentials
 
-To use credentials from an existing Pi login:
+Use `auth-json` instead of `api-key` and select the provider whose credential is
+in the document. For an `openai-codex` login, use `provider: openai-codex` and a
+model from that provider's Pi catalog.
 
-1. Run `/login` in Pi.
-2. Save the contents of `~/.pi/agent/auth.json` as the `PI_AUTH_JSON` repository
-   secret.
-3. Replace `api-key` with `auth-json` and select the provider whose credential is
-   in the file. For an `openai-codex` login, use:
+For persistent OAuth credentials, follow the shared
+[OAuth setup and migration guide](../docs/oauth.md). It includes a complete review
+workflow. Use a CI-only Pi login, an existing environment secret in the caller
+repository, and all three persistence inputs. Every consumer, including triage,
+must use the same job environment and job-level concurrency group with
+`cancel-in-progress: false`.
 
-```yaml
-- uses: narumiruna/pi-action/review@main
-  with:
-    pull-request: ${{ inputs.pull-request }}
-    auth-json: ${{ secrets.PI_AUTH_JSON }}
-    provider: openai-codex
-    model: gpt-6.1-sol
-    thinking: medium
-```
+Do not activate these settings before owner setup and publication of the new
+action revision. Pin that revision; older action revisions do not support these
+inputs. Complete the guide's controlled GitHub checks before production use.
 
-The action copies only the selected provider's credential to a temporary
-`auth.json` file with mode `0600`. It removes the temporary directory after success
-or failure. Refreshed OAuth credentials are not saved back to the GitHub secret;
-update the secret if the provider expires or rotates them.
+The action gives Pi only the selected provider's credential in a mode-`0600`
+temporary file and removes it after success or failure. With persistence enabled,
+it saves valid credential changes after every Pi exit, including failure, before
+parsing results or publishing comments. Other providers and metadata are
+preserved. A failed save fails the action before publication. Without persistence
+settings, refreshed credentials are not saved; replace them manually when needed.
 
 ### Use a custom review prompt
 
@@ -237,10 +239,14 @@ For `Provide exactly one of api-key or auth-json.`, check that the selected
 secret exists and is available to the workflow. Do not pass both inputs.
 
 For provider authentication errors, check that the credential matches
-`provider`. For expired or rotated OAuth credentials, repeat the
-[Pi login setup](#use-pi-credentials) and replace the GitHub Actions secret.
-Use a `model` from the selected provider's Pi catalog; changing `base-url`
+`provider`. Use a `model` from that provider's Pi catalog; changing `base-url`
 does not add models or change the API protocol.
+
+For `refresh_token_reused` or lost OAuth state, stop every consumer and follow
+[OAuth recovery](../docs/oauth.md#recovery-and-rollback). Obtain a fresh CI-only
+login and replace the environment secret; retrying the old token cannot repair
+it. For preflight or save failures, check the environment, secret name, and the
+writer token's `Environments: write` permission before restarting jobs.
 
 ### GitHub permission errors and fork pull requests
 
@@ -287,8 +293,10 @@ start a run for the latest commit instead.
 ## Verify in GitHub
 
 Local tests mock Pi and GitHub. They do not verify live model output, GitHub
-permissions, or rendered comments. After publishing an action revision, use a test
-pull request to check:
+permissions, or rendered comments. OAuth persistence also requires the
+[external verification handoff](../docs/oauth.md#external-verification-handoff),
+including queued secret-loading timing and a failure after refresh.
+After publishing an action revision, use a test pull request to check:
 
 1. Add known findings on an added line, a removed line, and a multiline range.
    Run a trusted workflow with the new action revision. Check the summary and
