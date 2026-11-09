@@ -18,7 +18,7 @@ test("allows a manual target and passes it to the rebase action", () => {
   expect(workflow).toContain("\n  workflow_dispatch:\n    inputs:\n      pull-request:")
   expect(workflow).toContain("required: false\n        type: string")
   expect(workflow).toContain(`pull-request: \${{ inputs.pull-request }}`)
-  expect(workflow).toMatch(/^\s+- uses: narumiruna\/pi-action\/rebase@[a-f0-9]{40}\s*$/m)
+  expect(workflow).toMatch(/^\s+- uses: narumiruna\/pi-actions\/rebase@[a-f0-9]{40}\s*$/m)
 })
 
 test("uses PAT_TOKEN so branch updates can trigger review workflows", () => {

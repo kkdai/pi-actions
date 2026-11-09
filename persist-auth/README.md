@@ -1,6 +1,6 @@
 # Persist Pi OAuth credentials
 
-Use `narumiruna/pi-action/persist-auth` to validate an already-refreshed Pi
+Use `narumiruna/pi-actions/persist-auth` to validate an already-refreshed Pi
 `auth.json` file and save it to an existing GitHub Actions environment secret in
 the caller repository. Pi performs OAuth refresh; this action does not log in,
 exchange provider tokens, or run a model.
@@ -27,7 +27,7 @@ Place these steps inside the protected job from the
 ```yaml
 - name: Review pull request
   id: review
-  uses: narumiruna/pi-action/review@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/review@<PUBLISHED_COMMIT_SHA>
   with:
     auth-json: ${{ secrets.PI_AUTH_JSON }}
     provider: openai-codex
@@ -36,7 +36,7 @@ Place these steps inside the protected job from the
 
 - name: Persist refreshed credentials
   if: always() && steps.review.outcome != 'skipped'
-  uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/persist-auth@<PUBLISHED_COMMIT_SHA>
   with:
     auth-file: ${{ runner.temp }}/pi-review-auth/auth.json
     auth-json: ${{ secrets.PI_AUTH_JSON }}

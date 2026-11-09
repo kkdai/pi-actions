@@ -1,12 +1,12 @@
 {
-  "name": "pi-action",
+  "name": "pi-actions",
   "version": "0.3.0",
   "description": "GitHub Actions for Pi reviews, issue triage, and native pull request rebasing.",
   "private": true,
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/narumiruna/pi-action.git"
+    "url": "git+https://github.com/narumiruna/pi-actions.git"
   },
   "scripts": {
     "build": "tsc",

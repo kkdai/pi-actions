@@ -29,7 +29,7 @@ jobs:
     steps:
       - name: Review pull request
         id: review
-        uses: narumiruna/pi-action/review@10517c9297a5135606b2869f8d3781bfa7ea674d
+        uses: narumiruna/pi-actions/review@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
@@ -40,7 +40,7 @@ jobs:
 
       - name: Persist refreshed credentials
         if: always() && steps.review.outcome != 'skipped'
-        uses: narumiruna/pi-action/persist-auth@10517c9297a5135606b2869f8d3781bfa7ea674d
+        uses: narumiruna/pi-actions/persist-auth@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           auth-file: ${{ runner.temp }}/pi-review-auth/auth.json
           auth-json: ${{ secrets.PI_AUTH_JSON }}

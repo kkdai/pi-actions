@@ -35,7 +35,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/review@main
+      - uses: narumiruna/pi-actions/review@main
         with:
           pull-request: ${{ inputs.pull-request }}
           api-key: ${{ secrets.PI_API_KEY }}
@@ -130,7 +130,7 @@ three inline persistence inputs. Inside the protected job from the
 ```yaml
 - name: Review pull request
   id: review
-  uses: narumiruna/pi-action/review@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/review@<PUBLISHED_COMMIT_SHA>
   with:
     auth-json: ${{ secrets.PI_AUTH_JSON }}
     provider: openai-codex
@@ -139,7 +139,7 @@ three inline persistence inputs. Inside the protected job from the
 
 - name: Persist refreshed credentials
   if: always() && steps.review.outcome != 'skipped'
-  uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/persist-auth@<PUBLISHED_COMMIT_SHA>
   with:
     auth-file: ${{ runner.temp }}/pi-review-auth/auth.json
     auth-json: ${{ secrets.PI_AUTH_JSON }}

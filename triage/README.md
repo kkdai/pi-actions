@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/triage@main
+      - uses: narumiruna/pi-actions/triage@main
         with:
           api-key: ${{ secrets.PI_API_KEY }}
           provider: openai
@@ -94,7 +94,7 @@ three inline persistence inputs. Inside the protected job from the
 ```yaml
 - name: Classify issue
   id: triage
-  uses: narumiruna/pi-action/triage@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/triage@<PUBLISHED_COMMIT_SHA>
   with:
     auth-json: ${{ secrets.PI_AUTH_JSON }}
     provider: openai-codex
@@ -103,7 +103,7 @@ three inline persistence inputs. Inside the protected job from the
 
 - name: Persist refreshed credentials
   if: always() && steps.triage.outcome != 'skipped'
-  uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+  uses: narumiruna/pi-actions/persist-auth@<PUBLISHED_COMMIT_SHA>
   with:
     auth-file: ${{ runner.temp }}/pi-triage-auth/auth.json
     auth-json: ${{ secrets.PI_AUTH_JSON }}
