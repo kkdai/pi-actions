@@ -34,7 +34,7 @@ jobs:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           auth-output: ${{ runner.temp }}/pi-review-auth/auth.json
-          provider: openai-codex
+          provider: openai
           model: gpt-6.1-sol
           thinking: medium
 

@@ -122,6 +122,11 @@ for (const action of ["review", "triage"]) {
       expect(workflow).not.toMatch(/auth-secret:|auth-environment:|auth-token:/)
     })
 
+    test("selects the OpenAI subscription OAuth provider in the repository workflow", () => {
+      expect(workflow).toMatch(/^\s+provider: openai$/m)
+      expect(workflow).not.toContain("provider: openai-codex")
+    })
+
     test("keeps the API-key usage independent of OAuth persistence", () => {
       const usage = yamlExamples(readme)[0] ?? ""
       expect(usage).toContain(`api-key: \${{ secrets.PI_API_KEY }}`)
