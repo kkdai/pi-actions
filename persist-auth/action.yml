@@ -1,0 +1,39 @@
+name: Persist Pi Auth
+description: Validate an already-refreshed Pi auth file and save it to an environment secret.
+
+inputs:
+  auth-file:
+    description: Private temporary auth file to consume and remove after validation.
+    required: true
+  token:
+    description: GitHub token with environment-secret access, such as the existing PAT_TOKEN.
+    required: true
+  environment:
+    description: Environment that owns the secret and is attached to the serialized caller job.
+    required: false
+    default: pi-oauth
+  secret-name:
+    description: Existing environment secret to update.
+    required: false
+    default: PI_AUTH_JSON
+  auth-json:
+    description: Optional original auth document for semantic unchanged detection.
+    required: false
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Node.js
+      uses: actions/setup-node@v7
+      with:
+        node-version: 26
+
+    - name: Persist refreshed credentials
+      shell: bash
+      env:
+        PI_AUTH_FILE: ${{ inputs.auth-file }}
+        PI_AUTH_TOKEN: ${{ inputs.token }}
+        PI_AUTH_ENVIRONMENT: ${{ inputs.environment }}
+        PI_AUTH_SECRET: ${{ inputs.secret-name }}
+        PI_AUTH_JSON: ${{ inputs.auth-json }}
+      run: node "$GITHUB_ACTION_PATH/../dist/persist-auth.js"

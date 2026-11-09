@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { maxAuthBytes } from "./auth.js";
 export function createAuthSecretWriter(env, options) {
     const secret = env.PI_AUTH_SECRET?.trim() || "";
     const environment = env.PI_AUTH_ENVIRONMENT?.trim() || "";
@@ -61,7 +62,7 @@ export function createAuthSecretWriter(env, options) {
     }
     return (auth) => {
         const input = JSON.stringify(auth);
-        if (Buffer.byteLength(input, "utf8") > 48 * 1024) {
+        if (Buffer.byteLength(input, "utf8") > maxAuthBytes) {
             throw new Error("Cannot save OAuth credentials: the environment secret exceeds 48 KB.");
         }
         try {

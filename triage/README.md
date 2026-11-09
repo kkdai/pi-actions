@@ -43,18 +43,19 @@ GitHub CLI; `ubuntu-latest` includes both. The action installs Node.js and Pi.
 
 ## Inputs
 
-| Input              | Required             | Default                       | Description                                                                                                        |
-| ------------------ | -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `api-key`          | One credential input | —                             | API key for the selected provider.                                                                                 |
-| `auth-json`        | One credential input | —                             | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
-| `auth-secret`      | With persistence     | —                             | Existing environment secret to update. Requires `auth-environment`, `auth-token`, and OAuth `auth-json`.           |
-| `auth-environment` | With persistence     | —                             | Environment that owns the secret and is attached to the caller's job.                                              |
-| `auth-token`       | With persistence     | —                             | GitHub token with repository `Environments: write` permission. An existing `PAT_TOKEN` can be reused.              |
-| `base-url`         | No                   | —                             | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
-| `provider`         | No                   | `openai`                      | Pi provider ID.                                                                                                    |
-| `model`            | No                   | `gpt-6.1-sol`                 | Model ID in the selected provider's Pi catalog.                                                                    |
-| `thinking`         | No                   | `medium`                      | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
-| `prompt`           | No                   | `.pi/prompts/triage-issue.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
+| Input              | Required             | Default                       | Description                                                                                                                       |
+| ------------------ | -------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `api-key`          | One credential input | —                             | API key for the selected provider.                                                                                                |
+| `auth-json`        | One credential input | —                             | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                                      |
+| `auth-output`      | No                   | —                             | Absolute private handoff path under `RUNNER_TEMP`. Requires OAuth `auth-json`; cannot be combined with inline persistence inputs. |
+| `auth-secret`      | With persistence     | —                             | Existing environment secret to update. Requires `auth-environment`, `auth-token`, and OAuth `auth-json`.                          |
+| `auth-environment` | With persistence     | —                             | Environment that owns the secret and is attached to the caller's job.                                                             |
+| `auth-token`       | With persistence     | —                             | GitHub token with repository `Environments: write` permission. An existing `PAT_TOKEN` can be reused.                             |
+| `base-url`         | No                   | —                             | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change.                |
+| `provider`         | No                   | `openai`                      | Pi provider ID.                                                                                                                   |
+| `model`            | No                   | `gpt-6.1-sol`                 | Model ID in the selected provider's Pi catalog.                                                                                   |
+| `thinking`         | No                   | `medium`                      | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model.                |
+| `prompt`           | No                   | `.pi/prompts/triage-issue.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                                      |
 
 Provide exactly one of `api-key` or `auth-json`, stored as a GitHub Actions secret.
 The workflow's `GITHUB_TOKEN` needs `issues: write`.
@@ -67,8 +68,10 @@ model from that provider's Pi catalog.
 
 For persistent OAuth credentials, follow the shared
 [OAuth setup and migration guide](../docs/oauth.md). It includes a complete triage
-workflow. Use a CI-only Pi login, an existing environment secret in the caller
-repository, and all three persistence inputs. Every consumer, including review,
+workflow for each persistence mode. Use a CI-only Pi login and an existing
+environment secret in the caller repository. For inline persistence, supply all
+three inputs: `auth-secret`, `auth-environment`, and `auth-token`.
+Every consumer, including review,
 must use the same job environment and job-level concurrency group with
 `cancel-in-progress: false`.
 
@@ -76,11 +79,62 @@ Do not activate these settings before owner setup and publication of the new
 action revision. Pin that revision; older action revisions do not support these
 inputs. Complete the guide's controlled GitHub checks before production use.
 
-With persistence enabled, valid credential changes are saved after every Pi exit,
+With inline persistence enabled, valid credential changes are saved after every Pi exit,
 including failure, before parsing results or adding labels. Other providers and
 metadata are preserved. A failed save fails the action before publication.
 Without persistence settings, refreshed credentials are not saved; replace them
 manually when needed.
+
+### Export credentials for a separate persistence step
+
+Use `auth-output` with [persist-auth](../persist-auth/README.md) instead of the
+three inline persistence inputs. Inside the protected job from the
+[shared guide](../docs/oauth.md#standalone-triage-githubworkflowstriageyml), use:
+
+```yaml
+- name: Classify issue
+  id: triage
+  uses: narumiruna/pi-action/triage@<PUBLISHED_COMMIT_SHA>
+  with:
+    auth-json: ${{ secrets.PI_AUTH_JSON }}
+    provider: openai-codex
+    model: gpt-6.1-sol
+    auth-output: ${{ runner.temp }}/pi-triage-auth/auth.json
+
+- name: Persist refreshed credentials
+  if: always() && steps.triage.outcome != 'skipped'
+  uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+  with:
+    auth-file: ${{ runner.temp }}/pi-triage-auth/auth.json
+    auth-json: ${{ secrets.PI_AUTH_JSON }}
+    token: ${{ secrets.PAT_TOKEN }}
+```
+
+Replace both placeholders with the same published, reviewed full commit SHA.
+Keep the shared job environment and lock with `cancel-in-progress: false`.
+Pass `PAT_TOKEN` only to the consumer's `token` input, not triage. Use the known
+absolute path in both steps, not a failed-step output. Do not add
+`continue-on-error`.
+
+Before Pi, the producer validates the entire original document and reserves a
+new `0600` file in a `0700` parent under `RUNNER_TEMP`. After every Pi invocation,
+including a failed exit, it merges only the selected OAuth credential into the
+original full document before returning or throwing. Successful no-ops export
+the unchanged full document, including unsupported triage activities, closed
+issues, and repositories without labels. Later result, state-check, or label
+publication failures retain a valid handoff. Invalid post-Pi credentials remove
+the incomplete handoff rather than restore a possibly consumed refresh token.
+
+The consumer deletes the validated private input on handled success, failure,
+or an unchanged result. Unsafe paths or ownership are rejected without deleting
+arbitrary files. Empty parent directories may remain; it never recursively
+deletes caller directories. These new modes require POSIX ownership and private
+permissions on Linux or macOS and fail closed when these cannot be established.
+
+Standalone preflight occurs after Pi. A save failure fails the job but cannot
+undo labels already applied. Keep inline mode if writeback must succeed before
+publication. Runner loss or forced cancellation can still prevent writeback and
+cleanup. Complete the shared guide's owner setup and live checks before activation.
 
 ### Use a custom triage prompt
 
