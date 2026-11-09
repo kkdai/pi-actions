@@ -1,5 +1,13 @@
 # pi-actions
 
+## 0.3.1
+
+### Patch Changes
+
+- 558b448: Update package metadata, workflow action paths, and documentation for the
+  repository rename to `narumiruna/pi-actions`. Keep existing review comment
+  markers unchanged.
+
 ## 0.3.0
 
 ### Minor Changes
