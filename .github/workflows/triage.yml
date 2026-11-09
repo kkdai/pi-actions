@@ -19,7 +19,7 @@ jobs:
     steps:
       - name: Classify issue
         id: triage
-        uses: narumiruna/pi-action/triage@10517c9297a5135606b2869f8d3781bfa7ea674d
+        uses: narumiruna/pi-actions/triage@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           auth-output: ${{ runner.temp }}/pi-triage-auth/auth.json
@@ -29,7 +29,7 @@ jobs:
 
       - name: Persist refreshed credentials
         if: always() && steps.triage.outcome != 'skipped'
-        uses: narumiruna/pi-action/persist-auth@10517c9297a5135606b2869f8d3781bfa7ea674d
+        uses: narumiruna/pi-actions/persist-auth@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           auth-file: ${{ runner.temp }}/pi-triage-auth/auth.json
           auth-json: ${{ secrets.PI_AUTH_JSON }}

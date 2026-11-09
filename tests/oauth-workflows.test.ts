@@ -44,12 +44,12 @@ function expectStandaloneSteps(
   const path = `\${{ runner.temp }}/pi-${action}-auth/auth.json`
 
   expect(producer).toContain(`id: ${action}`)
-  expect(producer).toContain(`pi-action/${action}@${revision}`)
+  expect(producer).toContain(`pi-actions/${action}@${revision}`)
   expect(producer).toContain(`auth-json: \${{ secrets.PI_AUTH_JSON }}`)
   expect(producer).toContain(`auth-output: ${path}`)
   expect(producer).not.toMatch(/PAT_TOKEN|auth-token:|auth-secret:|auth-environment:/)
   expect(consumer).toContain(`if: always() && steps.${action}.outcome != 'skipped'`)
-  expect(consumer).toContain(`pi-action/persist-auth@${revision}`)
+  expect(consumer).toContain(`pi-actions/persist-auth@${revision}`)
   expect(consumer).toContain(`auth-file: ${path}`)
   expect(consumer).toContain(`auth-json: \${{ secrets.PI_AUTH_JSON }}`)
   expect(consumer).toContain(`token: \${{ secrets.PAT_TOKEN }}`)
@@ -64,7 +64,7 @@ for (const action of ["review", "triage"]) {
     const manifest = read(`${action}/action.yml`)
     const readme = read(`${action}/README.md`)
     const workflow = read(`.github/workflows/${action}.yml`)
-    const actionExamples = examples.filter((value) => value.includes(`pi-action/${action}@`))
+    const actionExamples = examples.filter((value) => value.includes(`pi-actions/${action}@`))
     const inline = actionExamples.filter((value) => value.includes("auth-token:"))
     const standalone = actionExamples.filter((value) => value.includes("auth-output:"))
 
@@ -92,12 +92,12 @@ for (const action of ["review", "triage"]) {
       expect(inline.length).toBeGreaterThan(0)
       for (const example of inline) {
         expectProtectedJob(example, action)
-        expect(example).toContain(`pi-action/${action}@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>`)
+        expect(example).toContain(`pi-actions/${action}@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>`)
         expect(example).toContain(`auth-json: \${{ secrets.PI_AUTH_JSON }}`)
         expect(example).toContain("auth-secret: PI_AUTH_JSON")
         expect(example).toContain("auth-environment: pi-oauth")
         expect(example).toContain(`auth-token: \${{ secrets.PAT_TOKEN }}`)
-        expect(example).not.toMatch(/auth-output:|pi-action\/persist-auth@/)
+        expect(example).not.toMatch(/auth-output:|pi-actions\/persist-auth@/)
       }
     })
 
@@ -114,7 +114,7 @@ for (const action of ["review", "triage"]) {
 
     test("uses pinned standalone persistence in the repository workflow", () => {
       const revision = workflow.match(
-        new RegExp(`pi-action/${action}@([a-f0-9]{40})\\s*$`, "m"),
+        new RegExp(`pi-actions/${action}@([a-f0-9]{40})\\s*$`, "m"),
       )?.[1]
       expect(revision).toBeDefined()
       expectProtectedJob(workflow, action)
@@ -132,7 +132,7 @@ for (const action of ["review", "triage"]) {
       expect(usage).toContain(`api-key: \${{ secrets.PI_API_KEY }}`)
       expect(usage).toContain("cancel-in-progress: true")
       expect(usage).not.toMatch(
-        /auth-secret:|auth-environment:|auth-token:|auth-output:|pi-action\/persist-auth@/,
+        /auth-secret:|auth-environment:|auth-token:|auth-output:|pi-actions\/persist-auth@/,
       )
     })
 
@@ -188,7 +188,7 @@ describe("standalone persistence action", () => {
 
   test("documents the public action and safe standalone usage", () => {
     const readme = read("README.md")
-    expect(readme).toContain("`narumiruna/pi-action/persist-auth`")
+    expect(readme).toContain("`narumiruna/pi-actions/persist-auth`")
     expect(readme).toContain("persist-auth/README.md")
     expect(persistenceReadme).toContain("../docs/oauth.md")
     const snippet = yamlExamples(persistenceReadme).find((value) => value.includes("auth-output:"))

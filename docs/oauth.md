@@ -261,7 +261,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/review@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>
+      - uses: narumiruna/pi-actions/review@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>
         with:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
@@ -294,7 +294,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/triage@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>
+      - uses: narumiruna/pi-actions/triage@<PUBLISHED_OAUTH_PERSISTENCE_COMMIT_SHA>
         with:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           auth-secret: PI_AUTH_JSON
@@ -344,7 +344,7 @@ jobs:
     steps:
       - name: Review pull request
         id: review
-        uses: narumiruna/pi-action/review@<PUBLISHED_COMMIT_SHA>
+        uses: narumiruna/pi-actions/review@<PUBLISHED_COMMIT_SHA>
         with:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
@@ -354,7 +354,7 @@ jobs:
 
       - name: Persist refreshed credentials
         if: always() && steps.review.outcome != 'skipped'
-        uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+        uses: narumiruna/pi-actions/persist-auth@<PUBLISHED_COMMIT_SHA>
         with:
           auth-file: ${{ runner.temp }}/pi-review-auth/auth.json
           auth-json: ${{ secrets.PI_AUTH_JSON }}
@@ -384,7 +384,7 @@ jobs:
     steps:
       - name: Classify issue
         id: triage
-        uses: narumiruna/pi-action/triage@<PUBLISHED_COMMIT_SHA>
+        uses: narumiruna/pi-actions/triage@<PUBLISHED_COMMIT_SHA>
         with:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           provider: openai-codex
@@ -393,7 +393,7 @@ jobs:
 
       - name: Persist refreshed credentials
         if: always() && steps.triage.outcome != 'skipped'
-        uses: narumiruna/pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>
+        uses: narumiruna/pi-actions/persist-auth@<PUBLISHED_COMMIT_SHA>
         with:
           auth-file: ${{ runner.temp }}/pi-triage-auth/auth.json
           auth-json: ${{ secrets.PI_AUTH_JSON }}

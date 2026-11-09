@@ -4,12 +4,12 @@ Review pull requests and classify issues with
 [pi-coding-agent](https://github.com/earendil-works/pi). Rebase outdated pull
 request branches with GitHub.
 
-| Action                              | Purpose                                                                 | Documentation                               |
-| ----------------------------------- | ----------------------------------------------------------------------- | ------------------------------------------- |
-| `narumiruna/pi-action/review`       | Review a diff, post findings, and resolve verified fixes.               | [Review guide](review/README.md)            |
-| `narumiruna/pi-action/triage`       | Classify an issue and add existing repository labels.                   | [Triage guide](triage/README.md)            |
-| `narumiruna/pi-action/rebase`       | Rebase outdated pull request branches without a checkout.               | [Rebase guide](rebase/README.md)            |
-| `narumiruna/pi-action/persist-auth` | Save already-refreshed OAuth credentials from a private temporary file. | [Persistence guide](persist-auth/README.md) |
+| Action                               | Purpose                                                                 | Documentation                               |
+| ------------------------------------ | ----------------------------------------------------------------------- | ------------------------------------------- |
+| `narumiruna/pi-actions/review`       | Review a diff, post findings, and resolve verified fixes.               | [Review guide](review/README.md)            |
+| `narumiruna/pi-actions/triage`       | Classify an issue and add existing repository labels.                   | [Triage guide](triage/README.md)            |
+| `narumiruna/pi-actions/rebase`       | Rebase outdated pull request branches without a checkout.               | [Rebase guide](rebase/README.md)            |
+| `narumiruna/pi-actions/persist-auth` | Save already-refreshed OAuth credentials from a private temporary file. | [Persistence guide](persist-auth/README.md) |
 
 ## OAuth credentials
 

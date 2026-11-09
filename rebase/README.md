@@ -39,7 +39,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
+      - uses: narumiruna/pi-actions/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           pull-request: ${{ inputs.pull-request }}
           token: ${{ secrets.PAT_TOKEN }}
@@ -120,7 +120,7 @@ branch updates can trigger the `pull_request_target` review workflow. That token
 must permit contents and pull request writes. Pass it to `token`:
 
 ```yaml
-- uses: narumiruna/pi-action/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
+- uses: narumiruna/pi-actions/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
   with:
     pull-request: ${{ inputs.pull-request }}
     token: ${{ secrets.PAT_TOKEN }}

@@ -4,7 +4,7 @@ import { expect, test } from "vitest"
 const workflow = readFileSync(new URL("../.github/workflows/review.yml", import.meta.url), "utf8")
 
 test("pins the repository review action to a full commit SHA", () => {
-  expect(workflow).toMatch(/^\s+(?:- )?uses: narumiruna\/pi-action\/review@[a-f0-9]{40}\s*$/m)
+  expect(workflow).toMatch(/^\s+(?:- )?uses: narumiruna\/pi-actions\/review@[a-f0-9]{40}\s*$/m)
 })
 
 test("keeps automatic reviews on the trusted pull_request_target event", () => {
