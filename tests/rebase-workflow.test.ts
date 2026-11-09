@@ -18,7 +18,13 @@ test("allows a manual target and passes it to the rebase action", () => {
   expect(workflow).toContain("\n  workflow_dispatch:\n    inputs:\n      pull-request:")
   expect(workflow).toContain("required: false\n        type: string")
   expect(workflow).toContain(`pull-request: \${{ inputs.pull-request }}`)
-  expect(workflow).toMatch(/^\s+- uses: narumiruna\/pi-action\/rebase@main\s*$/m)
+  expect(workflow).toMatch(/^\s+- uses: narumiruna\/pi-action\/rebase@[a-f0-9]{40}\s*$/m)
+})
+
+test("uses PAT_TOKEN so branch updates can trigger review workflows", () => {
+  expect(workflow).toContain(`token: \${{ secrets.PAT_TOKEN }}`)
+  expect(workflow.match(/secrets\.PAT_TOKEN/g)).toHaveLength(1)
+  expect(workflow).not.toMatch(/secrets\.REBASE_TOKEN|token:.*github\.token/)
 })
 
 test("keeps manual single-PR runs out of the batch scan concurrency group", () => {

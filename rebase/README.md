@@ -39,9 +39,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: narumiruna/pi-action/rebase@main
+      - uses: narumiruna/pi-action/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           pull-request: ${{ inputs.pull-request }}
+          token: ${{ secrets.PAT_TOKEN }}
 ```
 
 Change `main` to your base branch. Pin the action to a trusted commit SHA for
@@ -114,13 +115,15 @@ approve those runs. See
 [GitHub's token event rules](https://docs.github.com/en/actions/concepts/security/github_token#when-github_token-triggers-workflow-runs).
 
 For CI that must run without this approval, use a suitable GitHub App installation
-token or personal access token. Store it as a secret and pass it to `token`:
+token or personal access token. The repository workflow reuses `PAT_TOKEN` so
+branch updates can trigger the `pull_request_target` review workflow. That token
+must permit contents and pull request writes. Pass it to `token`:
 
 ```yaml
-- uses: narumiruna/pi-action/rebase@main
+- uses: narumiruna/pi-action/rebase@10517c9297a5135606b2869f8d3781bfa7ea674d
   with:
     pull-request: ${{ inputs.pull-request }}
-    token: ${{ secrets.REBASE_TOKEN }}
+    token: ${{ secrets.PAT_TOKEN }}
 ```
 
 Updates made with that token can trigger this workflow again. The native

@@ -32,7 +32,11 @@ function expectProtectedJob(example: string, action: string): void {
   }
 }
 
-function expectStandaloneSteps(example: string, action: string): void {
+function expectStandaloneSteps(
+  example: string,
+  action: string,
+  revision = "<PUBLISHED_COMMIT_SHA>",
+): void {
   const consumerStart = example.indexOf("- name: Persist refreshed credentials")
   expect(consumerStart).toBeGreaterThan(0)
   const producer = example.slice(0, consumerStart)
@@ -40,12 +44,12 @@ function expectStandaloneSteps(example: string, action: string): void {
   const path = `\${{ runner.temp }}/pi-${action}-auth/auth.json`
 
   expect(producer).toContain(`id: ${action}`)
-  expect(producer).toContain(`pi-action/${action}@<PUBLISHED_COMMIT_SHA>`)
+  expect(producer).toContain(`pi-action/${action}@${revision}`)
   expect(producer).toContain(`auth-json: \${{ secrets.PI_AUTH_JSON }}`)
   expect(producer).toContain(`auth-output: ${path}`)
   expect(producer).not.toMatch(/PAT_TOKEN|auth-token:|auth-secret:|auth-environment:/)
   expect(consumer).toContain(`if: always() && steps.${action}.outcome != 'skipped'`)
-  expect(consumer).toContain("pi-action/persist-auth@<PUBLISHED_COMMIT_SHA>")
+  expect(consumer).toContain(`pi-action/persist-auth@${revision}`)
   expect(consumer).toContain(`auth-file: ${path}`)
   expect(consumer).toContain(`auth-json: \${{ secrets.PI_AUTH_JSON }}`)
   expect(consumer).toContain(`token: \${{ secrets.PAT_TOKEN }}`)
@@ -108,12 +112,19 @@ for (const action of ["review", "triage"]) {
       for (const snippet of snippets) expectStandaloneSteps(snippet, action)
     })
 
-    test("does not activate persistence in the repository workflow", () => {
-      expect(workflow).not.toMatch(
-        /auth-secret:|auth-environment:|auth-token:|auth-output:|auth-file:|pi-action\/persist-auth@/,
-      )
-      expect(workflow).not.toContain("environment: pi-oauth")
-      expect(workflow).not.toContain("group: pi-oauth-auth-json")
+    test("uses pinned standalone persistence in the repository workflow", () => {
+      const revision = workflow.match(
+        new RegExp(`pi-action/${action}@([a-f0-9]{40})\\s*$`, "m"),
+      )?.[1]
+      expect(revision).toBeDefined()
+      expectProtectedJob(workflow, action)
+      expectStandaloneSteps(workflow, action, revision)
+      expect(workflow).not.toMatch(/auth-secret:|auth-environment:|auth-token:/)
+    })
+
+    test("selects the OpenAI subscription OAuth provider in the repository workflow", () => {
+      expect(workflow).toMatch(/^\s+provider: openai$/m)
+      expect(workflow).not.toContain("provider: openai-codex")
     })
 
     test("keeps the API-key usage independent of OAuth persistence", () => {
