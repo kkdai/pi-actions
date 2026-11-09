@@ -1,5 +1,12 @@
 # pi-action
 
+## 0.3.0
+
+### Minor Changes
+
+- 4f20df2: Add opt-in OAuth credential persistence for review and triage through GitHub Actions environment secrets. Save refreshed credentials after Pi exits, including failures, while keeping the writer token separate from Pi and normal GitHub operations. Reuse an existing PAT_TOKEN for secret updates without a separate writer secret. Suppress OAuth error diagnostics that can contain tokens not yet saved by Pi. Document shared job serialization, setup, live verification, and recovery requirements.
+- 7e21903: Add a standalone persist-auth action that validates private OAuth credential files and saves them to environment secrets with an existing PAT_TOKEN. Add an optional auth-output handoff to review and triage, including failed Pi exits and successful no-op tasks, while preserving the inline persistence interface. Document cleanup ownership, shared job locking, and the standalone post-publication failure window.
+
 ## 0.2.0
 
 ### Minor Changes
