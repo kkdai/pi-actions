@@ -8,6 +8,9 @@ inputs:
   auth-json:
     description: Contents of Pi's auth.json. Provide this or api-key, not both.
     required: false
+  auth-output:
+    description: Private auth file path under runner.temp for a later persist-auth step. Cannot be combined with inline persistence inputs.
+    required: false
   auth-secret:
     description: Existing environment secret to update after OAuth refresh. Requires auth-environment and auth-token.
     required: false
@@ -58,6 +61,7 @@ runs:
         GH_TOKEN: ${{ github.token }}
         PI_PULL_REQUEST: ${{ inputs.pull-request }}
         PI_AUTH_JSON: ${{ inputs.auth-json }}
+        PI_AUTH_OUTPUT: ${{ inputs.auth-output }}
         PI_AUTH_SECRET: ${{ inputs.auth-secret }}
         PI_AUTH_ENVIRONMENT: ${{ inputs.auth-environment }}
         PI_AUTH_TOKEN: ${{ inputs.auth-token }}

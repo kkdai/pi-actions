@@ -3,35 +3,57 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual } from "node:util";
+import { isOAuth, isObject, maskSecrets, parseAuthDocument, secretStrings } from "./auth.js";
+import { AuthFile } from "./auth-file.js";
 import { createAuthSecretWriter } from "./oauth-secret.js";
+export { escapeCommand } from "./auth.js";
 const thinkingLevels = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
-function isObject(value) {
-    return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-export function escapeCommand(value) {
-    return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-function secretStrings(value) {
-    if (typeof value === "string")
-        return value ? [value] : [];
-    if (!value || typeof value !== "object")
-        return [];
-    return Object.entries(value).flatMap(([key, entry]) => key === "type" ? [] : secretStrings(entry));
-}
-function maskSecrets(value) {
-    for (const secret of secretStrings(value)) {
-        console.log(`::add-mask::${escapeCommand(secret)}`);
+function withAuthHandoff(path, runnerTemp, auth, task) {
+    if (!path)
+        return task();
+    const file = AuthFile.open(path, runnerTemp, true);
+    let valid = false;
+    let failure;
+    let result;
+    const handoff = {
+        capture: (updated) => {
+            valid = false;
+            const json = JSON.stringify(updated);
+            parseAuthDocument(json);
+            maskSecrets(updated);
+            file.write(json);
+            valid = true;
+        },
+        invalidate: () => {
+            valid = false;
+        },
+    };
+    try {
+        // A task can return before Pi runs. Its original credentials are unchanged.
+        handoff.capture(auth);
+        result = task(handoff);
     }
-}
-function isOAuth(value) {
-    return (isObject(value) &&
-        value.type === "oauth" &&
-        typeof value.access === "string" &&
-        value.access.trim().length > 0 &&
-        typeof value.refresh === "string" &&
-        value.refresh.trim().length > 0 &&
-        typeof value.expires === "number" &&
-        Number.isFinite(value.expires));
+    catch (error) {
+        failure = error;
+    }
+    for (const cleanup of [
+        () => {
+            if (!valid)
+                file.remove();
+        },
+        () => file.close(),
+    ]) {
+        try {
+            cleanup();
+        }
+        catch (error) {
+            const message = error instanceof Error ? error.message : "Auth handoff cleanup failed.";
+            failure = new Error(`${failure instanceof Error ? `${failure.message}\n` : ""}${message}`);
+        }
+    }
+    if (failure)
+        throw failure;
+    return result;
 }
 export function withPi(defaultPrompt, task) {
     const env = process.env;
@@ -40,6 +62,7 @@ export function withPi(defaultPrompt, task) {
     const thinking = env.PI_THINKING?.trim() || "medium";
     const apiKey = env.PI_API_KEY || "";
     const authJson = env.PI_AUTH_JSON || "";
+    const authOutput = env.PI_AUTH_OUTPUT || "";
     const baseUrl = env.PI_BASE_URL?.trim();
     if (!provider || !model)
         throw new Error("provider and model are required.");
@@ -74,6 +97,15 @@ export function withPi(defaultPrompt, task) {
     maskSecrets(credential);
     maskSecrets(env.PI_AUTH_TOKEN);
     const persistenceRequested = Boolean(env.PI_AUTH_SECRET || env.PI_AUTH_ENVIRONMENT || env.PI_AUTH_TOKEN);
+    if (authOutput && persistenceRequested) {
+        throw new Error("auth-output cannot be combined with inline auth-secret, auth-environment, or auth-token.");
+    }
+    if (authOutput) {
+        if (!authJson || !isOAuth(credential)) {
+            throw new Error("auth-output requires auth-json with a complete selected OAuth credential.");
+        }
+        auth = parseAuthDocument(authJson);
+    }
     if (persistenceRequested && (!authJson || !isOAuth(credential))) {
         throw new Error("OAuth persistence requires auth-json with a complete OAuth credential.");
     }
@@ -82,6 +114,7 @@ export function withPi(defaultPrompt, task) {
         apiKey,
         env.PI_AUTH_TOKEN,
         env.PI_AUTH_TOKEN?.trim(),
+        env.PAT_TOKEN,
         env.GH_TOKEN,
         env.GITHUB_TOKEN,
         env.GH_ENTERPRISE_TOKEN,
@@ -105,113 +138,121 @@ export function withPi(defaultPrompt, task) {
     }
     if (!existsSync(promptPath))
         throw new Error("The prompt file does not exist.");
-    const directory = mkdtempSync(join(runnerTemp, "pi-action-"));
-    try {
-        writeFileSync(join(directory, "auth.json"), JSON.stringify({ [provider]: credential }), {
-            mode: 0o600,
-        });
-        if (baseUrl) {
-            writeFileSync(join(directory, "models.json"), JSON.stringify({ providers: { [provider]: { baseUrl } } }));
-        }
-        const commandEnv = { ...env };
-        delete commandEnv.PI_API_KEY;
-        delete commandEnv.PI_AUTH_JSON;
-        delete commandEnv.PI_AUTH_TOKEN;
-        delete commandEnv.PI_AUTH_SECRET;
-        delete commandEnv.PI_AUTH_ENVIRONMENT;
-        const options = {
-            encoding: "utf8",
-            env: commandEnv,
-            maxBuffer: 20 * 1024 * 1024,
-        };
-        const saveAuth = createAuthSecretWriter(env, options);
-        const piEnv = {
-            ...commandEnv,
-            PI_CODING_AGENT_DIR: directory,
-            PI_SKIP_VERSION_CHECK: "1",
-        };
-        delete piEnv.GH_TOKEN;
-        delete piEnv.GITHUB_TOKEN;
-        delete piEnv.GH_ENTERPRISE_TOKEN;
-        delete piEnv.GITHUB_ENTERPRISE_TOKEN;
-        const run = (inputPath, instruction) => {
-            let output = "";
-            let piError;
-            try {
-                output = execFileSync("pi", [
-                    "--print",
-                    "--mode",
-                    "text",
-                    "--no-session",
-                    "--no-tools",
-                    "--no-extensions",
-                    "--no-skills",
-                    "--no-prompt-templates",
-                    "--no-themes",
-                    "--no-context-files",
-                    "--no-approve",
-                    "--provider",
-                    provider,
-                    "--model",
-                    model,
-                    "--thinking",
-                    thinking,
-                    "--system-prompt",
-                    promptPath,
-                    `@${inputPath}`,
-                    instruction,
-                ], { ...options, env: piEnv, cwd: directory, stdio: ["pipe", "pipe", "pipe"] }).trim();
+    return withAuthHandoff(authOutput, runnerTemp, auth, (handoff) => {
+        const directory = mkdtempSync(join(runnerTemp, "pi-action-"));
+        try {
+            writeFileSync(join(directory, "auth.json"), JSON.stringify({ [provider]: credential }), {
+                mode: 0o600,
+            });
+            if (baseUrl) {
+                writeFileSync(join(directory, "models.json"), JSON.stringify({ providers: { [provider]: { baseUrl } } }));
             }
-            catch (error) {
-                piError = error;
-            }
-            let persistenceError;
-            try {
-                const updated = JSON.parse(readFileSync(join(directory, "auth.json"), "utf8"));
-                const selected = isObject(updated) ? updated[provider] : undefined;
-                secrets.push(...secretStrings(updated));
-                maskSecrets(selected);
-                if (saveAuth) {
-                    if (!isOAuth(selected))
-                        throw new Error("Pi returned invalid OAuth credentials.");
-                    const refreshed = { ...credential, ...selected };
-                    if (!isDeepStrictEqual(refreshed, credential)) {
+            const commandEnv = { ...env };
+            delete commandEnv.PI_API_KEY;
+            delete commandEnv.PI_AUTH_JSON;
+            delete commandEnv.PI_AUTH_TOKEN;
+            delete commandEnv.PI_AUTH_SECRET;
+            delete commandEnv.PI_AUTH_ENVIRONMENT;
+            delete commandEnv.PI_AUTH_OUTPUT;
+            delete commandEnv.PAT_TOKEN;
+            const options = {
+                encoding: "utf8",
+                env: commandEnv,
+                maxBuffer: 20 * 1024 * 1024,
+            };
+            const saveAuth = createAuthSecretWriter(env, options);
+            const piEnv = {
+                ...commandEnv,
+                PI_CODING_AGENT_DIR: directory,
+                PI_SKIP_VERSION_CHECK: "1",
+            };
+            delete piEnv.GH_TOKEN;
+            delete piEnv.GITHUB_TOKEN;
+            delete piEnv.GH_ENTERPRISE_TOKEN;
+            delete piEnv.GITHUB_ENTERPRISE_TOKEN;
+            const run = (inputPath, instruction) => {
+                let output = "";
+                let piError;
+                handoff?.invalidate();
+                try {
+                    output = execFileSync("pi", [
+                        "--print",
+                        "--mode",
+                        "text",
+                        "--no-session",
+                        "--no-tools",
+                        "--no-extensions",
+                        "--no-skills",
+                        "--no-prompt-templates",
+                        "--no-themes",
+                        "--no-context-files",
+                        "--no-approve",
+                        "--provider",
+                        provider,
+                        "--model",
+                        model,
+                        "--thinking",
+                        thinking,
+                        "--system-prompt",
+                        promptPath,
+                        `@${inputPath}`,
+                        instruction,
+                    ], { ...options, env: piEnv, cwd: directory, stdio: ["pipe", "pipe", "pipe"] }).trim();
+                }
+                catch (error) {
+                    piError = error;
+                }
+                let persistenceError;
+                try {
+                    const updated = JSON.parse(readFileSync(join(directory, "auth.json"), "utf8"));
+                    const selected = isObject(updated) ? updated[provider] : undefined;
+                    secrets.push(...secretStrings(updated));
+                    maskSecrets(selected);
+                    if (saveAuth || handoff) {
+                        if (!isOAuth(selected))
+                            throw new Error("Pi returned invalid OAuth credentials.");
+                        const refreshed = { ...credential, ...selected };
                         const nextAuth = { ...auth, [provider]: refreshed };
-                        saveAuth(nextAuth);
+                        if (handoff)
+                            handoff.capture(nextAuth);
+                        else if (!isDeepStrictEqual(refreshed, credential))
+                            saveAuth?.(nextAuth);
                         auth = nextAuth;
                         credential = refreshed;
                     }
                 }
-            }
-            catch (error) {
-                if (saveAuth) {
-                    persistenceError = new Error(error instanceof Error && error.message.startsWith("Cannot save")
-                        ? error.message
-                        : "Cannot persist OAuth credentials: Pi's auth.json is missing or invalid.");
+                catch (error) {
+                    if (saveAuth || handoff) {
+                        persistenceError = new Error(error instanceof Error && error.message.startsWith("Cannot save")
+                            ? error.message
+                            : handoff
+                                ? "Cannot prepare the OAuth auth-output handoff: credentials are missing, invalid, or cannot be written."
+                                : "Cannot persist OAuth credentials: Pi's auth.json is missing or invalid.");
+                    }
                 }
-            }
-            if (piError) {
-                // A failed refresh can include new tokens in stderr without saving them.
-                // Even a valid auth.json cannot make arbitrary OAuth diagnostics safe.
-                const status = isObject(piError) ? piError.status : undefined;
-                let message = credential.type === "api_key"
-                    ? redact(piError instanceof Error ? piError.message : "Pi failed.")
-                    : `${Number.isSafeInteger(status) ? `Pi failed with exit code ${status}.` : "Pi failed to start or was interrupted."} OAuth child diagnostics were suppressed to protect credentials.`;
-                if (piError instanceof Error && piError.message.includes("refresh_token_reused")) {
-                    message +=
-                        " Sign in to Pi again and replace the saved credential; do not retry the old refresh token.";
+                if (piError) {
+                    // A failed refresh can include new tokens in stderr without saving them.
+                    // Even a valid auth.json cannot make arbitrary OAuth diagnostics safe.
+                    const status = isObject(piError) ? piError.status : undefined;
+                    let message = credential.type === "api_key"
+                        ? redact(piError instanceof Error ? piError.message : "Pi failed.")
+                        : `${Number.isSafeInteger(status) ? `Pi failed with exit code ${status}.` : "Pi failed to start or was interrupted."} OAuth child diagnostics were suppressed to protect credentials.`;
+                    if (piError instanceof Error && piError.message.includes("refresh_token_reused")) {
+                        message +=
+                            " Sign in to Pi again and replace the saved credential; do not retry the old refresh token.";
+                    }
+                    if (persistenceError instanceof Error)
+                        message += `\n${persistenceError.message}`;
+                    throw new Error(message);
                 }
-                if (persistenceError instanceof Error)
-                    message += `\n${persistenceError.message}`;
-                throw new Error(message);
-            }
-            if (persistenceError)
-                throw persistenceError;
-            return output;
-        };
-        return task({ directory, options, run });
-    }
-    finally {
-        rmSync(directory, { recursive: true, force: true });
-    }
+                if (persistenceError)
+                    throw persistenceError;
+                return output;
+            };
+            return task({ directory, options, run });
+        }
+        finally {
+            rmSync(directory, { recursive: true, force: true });
+        }
+    });
 }

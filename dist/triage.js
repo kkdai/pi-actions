@@ -49,6 +49,8 @@ function triageIssue() {
     }
     if (typeof event.action !== "string" ||
         !["opened", "edited", "reopened"].includes(event.action)) {
+        if (env.PI_AUTH_OUTPUT)
+            withPi(".pi/prompts/triage-issue.md", () => undefined);
         console.log("Skipping unsupported issue activity.");
         return;
     }
