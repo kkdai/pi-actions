@@ -43,26 +43,44 @@ GitHub CLI; `ubuntu-latest` includes both. The action installs Node.js and Pi.
 
 ## Inputs
 
-| Input       | Required             | Default                       | Description                                                                                                        |
-| ----------- | -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `api-key`   | One credential input | —                             | API key for the selected provider.                                                                                 |
-| `auth-json` | One credential input | —                             | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
-| `base-url`  | No                   | —                             | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
-| `provider`  | No                   | `openai`                      | Pi provider ID.                                                                                                    |
-| `model`     | No                   | `gpt-6.1-sol`                 | Model ID in the selected provider's Pi catalog.                                                                    |
-| `thinking`  | No                   | `medium`                      | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
-| `prompt`    | No                   | `.pi/prompts/triage-issue.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
+| Input              | Required             | Default                       | Description                                                                                                        |
+| ------------------ | -------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `api-key`          | One credential input | —                             | API key for the selected provider.                                                                                 |
+| `auth-json`        | One credential input | —                             | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
+| `auth-secret`      | With persistence     | —                             | Existing environment secret to update. Requires `auth-environment`, `auth-token`, and OAuth `auth-json`.           |
+| `auth-environment` | With persistence     | —                             | Environment that owns the secret and is attached to the caller's job.                                              |
+| `auth-token`       | With persistence     | —                             | Dedicated writer token with repository `Environments: write` permission.                                           |
+| `base-url`         | No                   | —                             | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
+| `provider`         | No                   | `openai`                      | Pi provider ID.                                                                                                    |
+| `model`            | No                   | `gpt-6.1-sol`                 | Model ID in the selected provider's Pi catalog.                                                                    |
+| `thinking`         | No                   | `medium`                      | `off`, `minimal`, `low`, `medium`, `high`, `xhigh`, or `max`. Pi limits the level to those supported by the model. |
+| `prompt`           | No                   | `.pi/prompts/triage-issue.md` | Path to a Markdown system prompt, relative to the workspace. The default has a bundled copy.                       |
 
 Provide exactly one of `api-key` or `auth-json`, stored as a GitHub Actions secret.
 The workflow's `GITHUB_TOKEN` needs `issues: write`.
 
 ### Use Pi credentials
 
-Run `/login` in Pi and save the contents of `~/.pi/agent/auth.json` as the
-`PI_AUTH_JSON` repository secret. Replace `api-key` with
-`auth-json: ${{ secrets.PI_AUTH_JSON }}` and set `provider` to the provider ID
-whose credential is in the file. For an `openai-codex` login, use
-`provider: openai-codex` and select a model from that provider's Pi catalog.
+Use `auth-json` instead of `api-key` and select the provider whose credential is
+in the document. For an `openai-codex` login, use `provider: openai-codex` and a
+model from that provider's Pi catalog.
+
+For persistent OAuth credentials, follow the shared
+[OAuth setup and migration guide](../docs/oauth.md). It includes a complete triage
+workflow. Use a CI-only Pi login, an existing environment secret in the caller
+repository, and all three persistence inputs. Every consumer, including review,
+must use the same job environment and job-level concurrency group with
+`cancel-in-progress: false`.
+
+Do not activate these settings before owner setup and publication of the new
+action revision. Pin that revision; older action revisions do not support these
+inputs. Complete the guide's controlled GitHub checks before production use.
+
+With persistence enabled, valid credential changes are saved after every Pi exit,
+including failure, before parsing results or adding labels. Other providers and
+metadata are preserved. A failed save fails the action before publication.
+Without persistence settings, refreshed credentials are not saved; replace them
+manually when needed.
 
 ### Use a custom triage prompt
 
@@ -116,10 +134,14 @@ For `Provide exactly one of api-key or auth-json.`, check that the selected
 secret exists and is available to the workflow. Do not pass both inputs.
 
 For provider authentication errors, check that the credential matches
-`provider`. For expired or rotated OAuth credentials, run `/login` in Pi again
-and replace the GitHub Actions secret. Refreshed credentials are not saved back
-to the secret. Use a `model` from the selected provider's Pi catalog; changing
-`base-url` does not add models or change the API protocol.
+`provider`. Use a `model` from that provider's Pi catalog; changing `base-url`
+does not add models or change the API protocol.
+
+For `refresh_token_reused` or lost OAuth state, stop every consumer and follow
+[OAuth recovery](../docs/oauth.md#recovery-and-rollback). Obtain a fresh CI-only
+login and replace the environment secret; retrying the old token cannot repair
+it. For preflight or save failures, check the environment, secret name, and the
+dedicated writer's `Environments: write` permission before restarting jobs.
 
 ### GitHub permission errors
 
@@ -158,15 +180,18 @@ maintainers are preserved.
 
 ## Verify in GitHub
 
-The [repository workflow](../.github/workflows/triage.yml) uses `PI_AUTH_JSON` with
-`openai-codex`. It runs after the workflow is merged into the default branch.
+The [repository workflow](../.github/workflows/triage.yml) is not yet migrated to
+OAuth persistence. Do not activate persistence before owner setup, publication,
+and pinning of the new action revision. Use the
+[shared migration examples](../docs/oauth.md#migration-examples), then complete
+the [external verification handoff](../docs/oauth.md#external-verification-handoff).
+This includes queued secret-loading timing and a failure after refresh.
 
-A repository maintainer must configure the Pi credential secret after publishing
-the action revision. Run the workflow on a test issue with suitable repository
-labels. Check the selected labels, then rerun it and confirm that other labels
-remain unchanged. Complete this check before relying on automatic classification.
-Local integration tests mock Pi and GitHub; they do not verify live model accuracy,
-GitHub permissions, or label publication.
+Run the published action on a test issue with suitable repository labels. Check
+the selected labels, then rerun it and confirm that other labels remain unchanged.
+Complete these checks before relying on automatic classification. Local tests
+mock Pi and GitHub; they do not verify live model accuracy, GitHub permissions,
+or label publication.
 
 ## Rollback
 
