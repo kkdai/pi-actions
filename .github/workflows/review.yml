@@ -15,22 +15,33 @@ permissions:
   contents: read
   pull-requests: write
 
-concurrency:
-  group: pi-review-${{ github.event.pull_request.number || inputs.pull-request }}
-  cancel-in-progress: true
-
 jobs:
   review:
     # Do not check out or execute pull request code in this trusted workflow.
     if: github.actor != 'dependabot[bot]'
+    # Configure this environment's PI_AUTH_JSON before enabling the workflow.
+    environment: pi-oauth
+    concurrency:
+      group: pi-oauth-auth-json
+      cancel-in-progress: false
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      # Includes the comment layouts merged in PRs #19 and #22.
-      - uses: narumiruna/pi-action/review@986bbbb43d30f5d1bc52d434039a3f5161a13600
+      - name: Review pull request
+        id: review
+        uses: narumiruna/pi-action/review@10517c9297a5135606b2869f8d3781bfa7ea674d
         with:
           pull-request: ${{ inputs.pull-request }}
           auth-json: ${{ secrets.PI_AUTH_JSON }}
+          auth-output: ${{ runner.temp }}/pi-review-auth/auth.json
           provider: openai-codex
           model: gpt-6.1-sol
           thinking: medium
+
+      - name: Persist refreshed credentials
+        if: always() && steps.review.outcome != 'skipped'
+        uses: narumiruna/pi-action/persist-auth@10517c9297a5135606b2869f8d3781bfa7ea674d
+        with:
+          auth-file: ${{ runner.temp }}/pi-review-auth/auth.json
+          auth-json: ${{ secrets.PI_AUTH_JSON }}
+          token: ${{ secrets.PAT_TOKEN }}

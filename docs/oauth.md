@@ -10,10 +10,12 @@ Do not activate persistence until the owner has completed credential setup and
 the new action revision is published. Pin all actions to that reviewed revision.
 Do not add the new inputs to an older action revision.
 
-The repository's existing `.github/workflows/review.yml` and `triage.yml` are not
-migrated by this guide. The examples below are migration templates, not active
-configuration. External setup and controlled GitHub checks remain required.
-Local tests do not establish production readiness.
+The repository's `.github/workflows/review.yml` and `triage.yml` use standalone
+persistence with pinned action revisions and the shared `pi-oauth` environment.
+Configure that environment's `PI_AUTH_JSON` and verify `PAT_TOKEN` permissions
+before enabling these workflow definitions. The examples below are templates for
+other repositories. External setup and controlled GitHub checks remain required;
+local tests do not establish production readiness.
 
 ## Persistence modes
 
@@ -140,9 +142,14 @@ Fine-grained PATs and GitHub App tokens need the repository permission
 to the repository. For a new token, limit access to the caller repository and
 avoid unrelated permissions.
 
+The repository's rebase workflow also uses `PAT_TOKEN` and needs contents and
+pull request write access. Verify both those permissions and environment-secret
+access before enabling the updated workflows.
+
 A shared PAT can have permissions required by other workflows. Sharing it also
-increases the impact of a leak. Pass it only through inline `auth-token` or
-standalone `token`; do not grant additional permissions solely for model access.
+increases the impact of a leak. For OAuth persistence, pass it only through inline
+`auth-token` or standalone `token`; do not grant additional permissions solely
+for model access.
 
 GitHub's official REST documentation specifies:
 

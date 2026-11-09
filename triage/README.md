@@ -234,12 +234,12 @@ maintainers are preserved.
 
 ## Verify in GitHub
 
-The [repository workflow](../.github/workflows/triage.yml) is not yet migrated to
-OAuth persistence. Do not activate persistence before owner setup, publication,
-and pinning of the new action revision. Use the
-[shared migration examples](../docs/oauth.md#migration-examples), then complete
-the [external verification handoff](../docs/oauth.md#external-verification-handoff).
-This includes queued secret-loading timing and a failure after refresh.
+The [repository workflow](../.github/workflows/triage.yml) uses standalone
+persistence with pinned action revisions. Before enabling it, configure the
+`pi-oauth` environment's `PI_AUTH_JSON` and verify the existing `PAT_TOKEN` can
+update that environment secret. Complete the
+[external verification handoff](../docs/oauth.md#external-verification-handoff),
+including queued secret-loading timing and a failure after refresh.
 
 Run the published action on a test issue with suitable repository labels. Check
 the selected labels, then rerun it and confirm that other labels remain unchanged.
