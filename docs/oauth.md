@@ -20,11 +20,11 @@ Local tests do not establish production readiness.
 Provide exactly one of `api-key` or `auth-json`. Persistence requires `auth-json`
 with an OAuth credential for the selected `provider`, plus all three inputs:
 
-| Input              | Required value                                                                   |
-| ------------------ | -------------------------------------------------------------------------------- |
-| `auth-secret`      | Name of an existing environment secret, such as `PI_AUTH_JSON`.                  |
-| `auth-environment` | Environment that owns the secret and is attached to the job, such as `pi-oauth`. |
-| `auth-token`       | Dedicated GitHub token with permission to update that environment secret.        |
+| Input              | Required value                                                                                         |
+| ------------------ | ------------------------------------------------------------------------------------------------------ |
+| `auth-secret`      | Name of an existing environment secret, such as `PI_AUTH_JSON`.                                        |
+| `auth-environment` | Environment that owns the secret and is attached to the job, such as `pi-oauth`.                       |
+| `auth-token`       | GitHub token with permission to update that environment secret; an existing `PAT_TOKEN` can be reused. |
 
 The selected provider's entry must contain `type: "oauth"`, non-empty `access`
 and `refresh` strings, and a finite numeric `expires` timestamp in milliseconds.
@@ -47,11 +47,17 @@ required when the stored credentials become invalid.
 
 ## Writer token permissions
 
-Use a fine-grained personal access token (PAT) limited to the caller repository,
-or a GitHub App token limited to that repository. Grant the repository permission
-**Environments: read and write**. This is the least permission level that covers
-both environment-secret metadata access and updates. Do not grant unrelated
-permissions to the writer.
+Reuse the existing `PAT_TOKEN` repository secret if its token can update the
+caller's environment secrets. No additional token secret is required.
+
+Fine-grained PATs and GitHub App tokens need the repository permission
+**Environments: read and write**. Classic PATs need the `repo` scope and access
+to the repository. For a new token, limit access to the caller repository and
+avoid unrelated permissions.
+
+A shared PAT can have permissions required by other workflows. Sharing it also
+increases the impact of a leak. Pass it only through the action's `auth-token`
+input; do not grant additional permissions solely for model access.
 
 GitHub's official REST documentation specifies:
 
@@ -69,9 +75,9 @@ needed. Organization approval and repository policies can still restrict access.
 
 Keep the normal workflow `GITHUB_TOKEN` for comments and labels. Do not replace
 it with the writer token or grant broad permissions to it. The action accepts the
-writer through `auth-token`, maps it to the dedicated `PI_AUTH_TOKEN` environment
-variable, and removes it from ordinary `gh` commands and Pi. Only environment
-secret operations receive it as their GitHub authentication token.
+writer through `auth-token`, maps it to the `PI_AUTH_TOKEN` environment variable,
+and removes it from ordinary `gh` commands and Pi. Within this action, only
+environment-secret operations receive it as their GitHub authentication token.
 
 ## Owner setup
 
@@ -84,16 +90,16 @@ or artifacts.
 2. Create the `pi-oauth` GitHub environment in the caller repository. Restrict
    access to trusted workflow revisions. Check that required reviewers and branch
    restrictions permit the intended trusted review and triage jobs.
-3. Create the dedicated writer token with the permission above. Verify metadata
+3. Check that the existing `PAT_TOKEN` has the permissions above. Verify metadata
    access and updates against a synthetic environment secret before using real
    OAuth data. Complete any required organization approval.
 4. Use Pi `/login` once with a CI-only login. Store its `auth.json` document as the
    environment secret `PI_AUTH_JSON`. Use a login that is not shared with local Pi
    sessions, another repository, or any consumer outside the shared lock.
-5. For the PAT examples below, store the writer as the environment secret
-   `PI_AUTH_WRITER_TOKEN`. For an App, supply a fresh token from a trusted token
-   creation step instead. Do not put the writer in job-level `env`, `GH_TOKEN`,
-   or `GITHUB_TOKEN`.
+5. Keep the existing `PAT_TOKEN` repository secret and pass it as `auth-token`,
+   as shown below. Do not create a separate writer secret. For an App, supply a
+   fresh token from a trusted token creation step instead. Do not put the writer
+   in job-level `env`, `GH_TOKEN`, or `GITHUB_TOKEN`.
 6. Remove any repository or organization `PI_AUTH_JSON` value available to these
    jobs after confirming the environment value is configured. Do not leave a
    same-name fallback that can hide a missing job environment.
@@ -166,7 +172,7 @@ jobs:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           auth-secret: PI_AUTH_JSON
           auth-environment: pi-oauth
-          auth-token: ${{ secrets.PI_AUTH_WRITER_TOKEN }}
+          auth-token: ${{ secrets.PAT_TOKEN }}
           provider: openai-codex
           model: gpt-6.1-sol
           thinking: medium
@@ -198,7 +204,7 @@ jobs:
           auth-json: ${{ secrets.PI_AUTH_JSON }}
           auth-secret: PI_AUTH_JSON
           auth-environment: pi-oauth
-          auth-token: ${{ secrets.PI_AUTH_WRITER_TOKEN }}
+          auth-token: ${{ secrets.PAT_TOKEN }}
           provider: openai-codex
           model: gpt-6.1-sol
           thinking: medium
@@ -273,8 +279,10 @@ before restarting jobs. Retrying the same consumed token cannot repair it.
 
 To disable persistence, remove `auth-secret`, `auth-environment`, and `auth-token`
 together. Return to manual credential replacement or API-key authentication.
-Keep any remaining OAuth consumers serialized. Revoke an unused writer token.
-Existing comments and labels do not need rollback.
+Keep any remaining OAuth consumers serialized. Removing persistence does not
+require revoking a shared `PAT_TOKEN` that other workflows still use. Revoke or
+rotate it if compromised or when it is no longer needed. Existing comments and
+labels do not need rollback.
 
 ## References
 

@@ -44,7 +44,7 @@ for (const action of ["review", "triage"]) {
       expect(example).toContain(`          auth-json: \${{ secrets.PI_AUTH_JSON }}`)
       expect(example).toContain("          auth-secret: PI_AUTH_JSON")
       expect(example).toContain("          auth-environment: pi-oauth")
-      expect(example).toContain(`          auth-token: \${{ secrets.PI_AUTH_WRITER_TOKEN }}`)
+      expect(example).toContain(`          auth-token: \${{ secrets.PAT_TOKEN }}`)
       expect(workflow).not.toMatch(/auth-secret:|auth-environment:|auth-token:/)
     })
 
@@ -69,6 +69,14 @@ for (const action of ["review", "triage"]) {
     })
   })
 }
+
+test("reuses PAT_TOKEN without requiring another token secret", () => {
+  expect(guide).toContain("No additional token secret is required.")
+  expect(guide).toContain("Classic PATs need the `repo` scope")
+  expect(guide).toContain("require revoking a shared `PAT_TOKEN` that other workflows still use.")
+  expect(guide).toContain("rotate it if compromised")
+  expect(guide).not.toMatch(/PI_AUTH_WRITER_TOKEN|PI_AUTH_UPDATE_TOKEN/)
+})
 
 test("retains explicit activation, live verification, and recovery gates", () => {
   expect(examples).toHaveLength(2)

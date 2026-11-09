@@ -83,7 +83,7 @@ number from the event and ignore this input.
 | `auth-json`        | One credential input | —                                    | Contents of Pi's `auth.json`, with an API key or OAuth credential for the selected provider.                       |
 | `auth-secret`      | With persistence     | —                                    | Existing environment secret to update. Requires `auth-environment`, `auth-token`, and OAuth `auth-json`.           |
 | `auth-environment` | With persistence     | —                                    | Environment that owns the secret and is attached to the caller's job.                                              |
-| `auth-token`       | With persistence     | —                                    | Dedicated writer token with repository `Environments: write` permission.                                           |
+| `auth-token`       | With persistence     | —                                    | GitHub token with repository `Environments: write` permission. An existing `PAT_TOKEN` can be reused.              |
 | `base-url`         | No                   | —                                    | HTTP or HTTPS API base URL override for an existing Pi provider. The API protocol and model catalog do not change. |
 | `provider`         | No                   | `openai`                             | Pi provider ID.                                                                                                    |
 | `model`            | No                   | `gpt-6.1-sol`                        | Model ID in the selected provider's Pi catalog.                                                                    |
@@ -246,7 +246,7 @@ For `refresh_token_reused` or lost OAuth state, stop every consumer and follow
 [OAuth recovery](../docs/oauth.md#recovery-and-rollback). Obtain a fresh CI-only
 login and replace the environment secret; retrying the old token cannot repair
 it. For preflight or save failures, check the environment, secret name, and the
-dedicated writer's `Environments: write` permission before restarting jobs.
+writer token's `Environments: write` permission before restarting jobs.
 
 ### GitHub permission errors and fork pull requests
 

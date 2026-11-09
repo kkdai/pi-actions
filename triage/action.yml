@@ -12,7 +12,7 @@ inputs:
     description: Environment that owns auth-secret and is attached to the caller's serialized job.
     required: false
   auth-token:
-    description: Dedicated GitHub token with Environments write permission. Requires auth-secret and auth-environment.
+    description: GitHub token with Environments write permission, such as an existing PAT_TOKEN. Requires auth-secret and auth-environment.
     required: false
   api-key:
     description: API key for the selected provider. Provide this or auth-json, not both.
